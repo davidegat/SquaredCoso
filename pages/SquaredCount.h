@@ -190,18 +190,26 @@ static int       snake_pos = 0;
 // ---------------------------------------------------------------------------
 // Fading di un colore RGB565 in base a life (0–255)
 // ---------------------------------------------------------------------------
-static uint16_t fade565(uint16_t c, uint8_t life)
+// life: 0-255  (255 = colore pieno, 0 = colore di sfondo)
+static uint16_t fade565(uint16_t fg, uint8_t life)
 {
-  uint8_t r = (c >> 11) & 0x1F;
-  uint8_t g = (c >> 5)  & 0x3F;
-  uint8_t b =  c        & 0x1F;
+  uint16_t bg = COL_BG;
 
-  r = (r * life) >> 8;
-  g = (g * life) >> 8;
-  b = (b * life) >> 8;
+  uint8_t fg_r = (fg >> 11) & 0x1F;
+  uint8_t fg_g = (fg >> 5)  & 0x3F;
+  uint8_t fg_b =  fg        & 0x1F;
+
+  uint8_t bg_r = (bg >> 11) & 0x1F;
+  uint8_t bg_g = (bg >> 5)  & 0x3F;
+  uint8_t bg_b =  bg        & 0x1F;
+
+  uint8_t r = bg_r + (((fg_r - bg_r) * life) >> 8);
+  uint8_t g = bg_g + (((fg_g - bg_g) * life) >> 8);
+  uint8_t b = bg_b + (((fg_b - bg_b) * life) >> 8);
 
   return (r << 11) | (g << 5) | b;
 }
+
 
 // ---------------------------------------------------------------------------
 // Calcola rettangolo corrente del serpente lungo il bordo dello schermo

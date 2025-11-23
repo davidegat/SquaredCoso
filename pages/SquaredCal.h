@@ -189,8 +189,8 @@ bool fetchICS() {
 // ---------------------------------------------------------------------------
 void pageCalendar() {
   drawHeader(
-    g_lang == "it" ? "Calendario (oggi)"
-                   : "Today's calendar"
+    g_lang == "it" ? "Oggi"
+                   : "Today"
   );
 
   int y = PAGE_Y;
@@ -226,7 +226,7 @@ void pageCalendar() {
     drawBoldMain(
       PAGE_X,
       y + CHAR_H,
-      (g_lang == "it" ? "Nessun evento" : "No events today"),
+      (g_lang == "it" ? "Nessun evento" : "No events"),
       TEXT_SCALE + 1
     );
     return;

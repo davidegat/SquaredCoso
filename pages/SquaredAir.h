@@ -195,6 +195,7 @@ static String airVerdict(int& categoryOut)
   }
 
   String s(buffer1);
+  s.reserve(64);
   s += ", ";
   s += buffer2;
   return s;
@@ -230,13 +231,36 @@ static bool fetchAir()
 
 // ---------------------------------------------------------------------------
 // PARTICLE SYSTEM – FOGLIE ORIZZONTALI IN BASSO SCHERMO
+//  - Versione ottimizzata: niente sinf(), usa LUT compatta in PROGMEM
 // ---------------------------------------------------------------------------
-#define N_LEAVES 45
+#define N_LEAVES 50
+#define SIN_LUT_SIZE 64
+
+// sinusoide approssimata su 0..2π, valori in [-127, 127]
+static const int8_t SIN_LUT[SIN_LUT_SIZE] PROGMEM = {
+    0,  12,  25,  37,  49,  60,  71,  81,
+   90,  98, 105, 111, 116, 120, 123, 125,
+  127, 125, 123, 120, 116, 111, 105,  98,
+   90,  81,  71,  60,  49,  37,  25,  12,
+    0, -12, -25, -37, -49, -60, -71, -81,
+  -90, -98,-105,-111,-116,-120,-123,-125,
+ -127,-125,-123,-120,-116,-111,-105, -98,
+  -90, -81, -71, -60, -49, -37, -25, -12
+};
+
+static inline float fastSinPhase(float phaseIdx)
+{
+  // phaseIdx in [0, SIN_LUT_SIZE)
+  int idx = (int)phaseIdx;
+  idx &= (SIN_LUT_SIZE - 1); // assume potenza di 2
+  int8_t v = pgm_read_byte(&SIN_LUT[idx]);
+  return (float)v / 127.0f;
+}
 
 struct Leaf {
   float    x, y;
   float    baseY;
-  float    phase;
+  float    phase;   // int-like, indice nella LUT
   float    vx;
   float    amp;
   uint16_t color;
@@ -260,7 +284,7 @@ static inline void initLeafFX(const int i)
 
   L.vx     = 1.0f + (float)(random(0, 20)) * 0.1f;
   L.amp    = (float)(6 + random(0, 10));
-  L.phase  = (float)(random(0, 628)) * 0.01f;
+  L.phase  = (float)random(0, SIN_LUT_SIZE);   // indice LUT
 
   L.size   = (uint8_t)random(0, 3);
   L.color  = pgm_read_word(&LEAF_COLORS[random(0, 2)]);
@@ -315,8 +339,13 @@ static void tickLeaves(const uint16_t bg)
     }
 
     L.x     += L.vx;
-    L.phase += 0.03f;
-    L.y      = L.baseY + sinf(L.phase) * L.amp;
+    L.phase += 0.5f;
+    if (L.phase >= (float)SIN_LUT_SIZE) {
+      L.phase -= (float)SIN_LUT_SIZE;
+    }
+
+    const float sinv = fastSinPhase(L.phase);
+    L.y = L.baseY + sinv * L.amp;
 
     if (L.x > 500.0f) {
       initLeafFX(i);

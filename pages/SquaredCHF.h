@@ -289,7 +289,7 @@ static inline void fxPrintRow(const char* lbl,
 // Pagina FX: titolo, tabella tassi e aggiornamento Money Rain
 // ---------------------------------------------------------------------------
 void pageFX() {
-  drawHeader("Valute vs " + g_fiat);
+  drawHeader("Exchange " + g_fiat);
 
   gfx->fillRect(AREA_X_MIN, AREA_Y_MIN,
                 AREA_X_MAX - AREA_X_MIN + 1,

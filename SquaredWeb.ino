@@ -2,18 +2,18 @@
 ===============================================================================
   SquaredCoso – Captive Portal & WebUI
   Modulo Web per Gat Multi Ticker (ESP32-S3 Panel-4848S040)
-  - Captive portal in AP mode (config Wi-Fi)
-  - WebUI in STA mode (settings complete del device)
-  - Configurazione pagine visibili, QOD, BTC, RSS, countdown
-  - Export / import JSON della configurazione
-  - HTML generato on-demand per ridurre RAM e frammentazione
+
+  Funzioni incluse:
+    ✔ Captive portal in AP mode (config Wi-Fi)
+    ✔ WebUI in STA mode (settings complete del device)
+    ✔ Configurazione pagine visibili, QOD, BTC, RSS, countdown
+    ✔ HTML generato on-demand per ridurre RAM e frammentazione
+
+  Funzioni rimosse:
+    ✘ Export configurazione
+    ✘ Import configurazione JSON
 ===============================================================================
 */
-
-// // HTTP helpers: risposta OK e GET con body in out
-// static inline bool isHttpOk(int code) {
-//   return code >= 200 && code < 300;
-// }
 
 bool httpGET(const String& url, String& out, uint32_t timeout) {
   HTTPClient http;
@@ -55,10 +55,13 @@ int indexOfCI(const String& s, const String& pat, int from) {
   return -1;
 }
 
+/* ---------------------------------------------------------------------------
+   CAPTIVE PORTAL — AP MODE
+   /        → form SSID / password
+   /save    → salva credenziali Wi-Fi
+   /reboot  → reboot del dispositivo
+--------------------------------------------------------------------------- */
 
-// ---------------------------------------------------------------------------
-// Captive portal in AP mode: form per SSID / password + reboot
-// ---------------------------------------------------------------------------
 static void handleRootAP() {
   web.send(200, "text/html; charset=utf-8", htmlAP());
 }
@@ -88,7 +91,7 @@ static void handleReboot() {
   ESP.restart();
 }
 
-// Pagina di setup Wi-Fi per captive portal AP
+// Pagina HTML per configurazione Wi-Fi in AP
 static String htmlAP() {
   String ip = WiFi.softAPIP().toString();
 
@@ -116,12 +119,9 @@ static String htmlAP() {
   return page;
 }
 
-
-// ---------------------------------------------------------------------------
-// WebUI SETTINGS (STA mode)
-//   - checkbox helper per "pagine visibili"
-//   - htmlSettings: pannello completo bilingue
-// ---------------------------------------------------------------------------
+/* ---------------------------------------------------------------------------
+   CHECKBOX helper per "pagine visibili"
+--------------------------------------------------------------------------- */
 static String checkbox(const char* name, bool checked, const char* label) {
   String s;
   s.reserve(96);
@@ -135,6 +135,10 @@ static String checkbox(const char* name, bool checked, const char* label) {
   return s;
 }
 
+/* ---------------------------------------------------------------------------
+   SETTINGS PAGE — STA MODE
+   (pannello completo bilingue)
+--------------------------------------------------------------------------- */
 String htmlSettings(bool saved, const String& msg) {
 
   const bool it = (g_lang == "it");
@@ -153,15 +157,15 @@ String htmlSettings(bool saved, const String& msg) {
   const char* t_qod      = it ? "Frase del giorno" : "Quote of the Day";
   const char* t_qoddesc  = it ? "Se imposti la chiave OpenAI userò GPT. Altrimenti ZenQuotes."
                               : "If you set the OpenAI key, GPT will be used. Otherwise ZenQuotes.";
-  const char* t_oa_key   = it ? "Chiave API OpenAI" : "OpenAI API Key";
+  const char* t_oa_key   = "OpenAI API Key";
   const char* t_oa_topic = it ? "Argomento frase" : "Quote topic";
   const char* t_force    = it ? "Richiedi nuova frase" : "Get new quote";
 
   const char* t_btc      = "Bitcoin";
   const char* t_btc_amt  = it ? "Quantità BTC posseduti" : "Owned BTC amount";
 
-  const char* t_rss       = it ? "Notizie RSS" : "RSS News";
-  const char* t_rss_label = it ? "URL feed RSS" : "RSS feed URL";
+  const char* t_rss       = "RSS News";
+  const char* t_rss_label = "RSS feed";
   const char* t_rss_hint  = it ? "Lascia vuoto per usare il feed predefinito."
                                : "Leave empty to use the default feed.";
 
@@ -169,17 +173,12 @@ String htmlSettings(bool saved, const String& msg) {
   const char* t_hint2    = it ? "Se le disattivi tutte, l'orologio resta comunque attivo."
                               : "If you disable all, the clock will still remain active.";
 
-  const char* t_count    = it ? "Countdown (max 8)" : "Countdowns (max 8)";
+  const char* t_count    = "Countdowns (max 8)";
   const char* t_name     = it ? "Nome #" : "Name #";
   const char* t_time     = it ? "Data/Ora #" : "Date/Time #";
 
   const char* t_savebtn  = it ? "Salva" : "Save";
   const char* t_home     = "Home";
-
-  const char* t_backup   = it ? "Backup" : "Backup";
-  const char* t_export   = it ? "Esporta impostazioni" : "Export settings";
-  const char* t_import   = it ? "Importa" : "Import";
-  const char* t_load     = it ? "Carica" : "Load";
 
   String notice;
   if (saved) {
@@ -305,12 +304,12 @@ String htmlSettings(bool saved, const String& msg) {
   page += checkbox("p_CAL",     g_show[P_CAL],     it ? "Calendario ICS" : "ICS Calendar");
   page += checkbox("p_BTC",     g_show[P_BTC],     "Bitcoin");
   page += checkbox("p_QOD",     g_show[P_QOD],     it ? "Frase del giorno" : "Quote of the Day");
-  page += checkbox("p_INFO",    g_show[P_INFO],    it ? "Info dispositivo" : "Device info");
+  page += checkbox("p_INFO",    g_show[P_INFO],    "Info");
   page += checkbox("p_COUNT",   g_show[P_COUNT],   "Countdown");
   page += checkbox("p_FX",      g_show[P_FX],      it ? "Valute" : "Currency");
   page += checkbox("p_T24",     g_show[P_T24],     it ? "Temperatura 24h" : "24h Temperature");
   page += checkbox("p_SUN",     g_show[P_SUN],     it ? "Ore di luce" : "Sunlight hours");
-  page += checkbox("p_NEWS",    g_show[P_NEWS],    it ? "Notizie RSS" : "RSS News");
+  page += checkbox("p_NEWS",    g_show[P_NEWS],    "RSS News");
 
   page += "</div>"
           "<p style='opacity:.6;font-size:.85rem;margin-top:8px'>" +
@@ -338,23 +337,13 @@ String htmlSettings(bool saved, const String& msg) {
           "<a class='btn ghost' href='/'>" + String(t_home) + "</a>"
           "</p></form></div>";
 
-  page += "<div class='card'><h3>" + String(t_backup) + "</h3>"
-          "<p><a class='btn ghost' href='/export'>" + String(t_export) + "</a></p>"
-
-          "<h3>" + String(t_import) + "</h3>"
-          "<form method='POST' action='/import' enctype='multipart/form-data'>"
-          "<input type='file' name='file' accept='application/json'/>"
-          "<p style='margin-top:10px'><button class='btn primary' type='submit'>" +
-          String(t_load) + "</button></p></form></div>";
-
   page += "</main></body></html>";
   return page;
 }
 
-
-// ---------------------------------------------------------------------------
-// Home STA minimale: riepilogo impostazioni e link a /settings
-// ---------------------------------------------------------------------------
+/* ---------------------------------------------------------------------------
+   HOME STA MINIMALE
+--------------------------------------------------------------------------- */
 static String htmlHome() {
   uint32_t s = PAGE_INTERVAL_MS / 1000;
   String enabledList;
@@ -403,145 +392,16 @@ static String htmlHome() {
   return page;
 }
 
-
-// ---------------------------------------------------------------------------
-// Root handler STA: serve htmlHome
-// ---------------------------------------------------------------------------
+/* ---------------------------------------------------------------------------
+   HANDLER STA ROOT
+--------------------------------------------------------------------------- */
 static void handleRootSTA() {
   web.send(200, "text/html; charset=utf-8", htmlHome());
 }
 
-
-// ---------------------------------------------------------------------------
-// Export configurazione in JSON scaricabile
-// ---------------------------------------------------------------------------
-static void handleExport() {
-  String json;
-  json.reserve(1024);
-
-  json  = "{";
-  json += "\"city\":\"";     json += jsonEscape(g_city);     json += "\",";
-  json += "\"lang\":\"";     json += jsonEscape(g_lang);     json += "\",";
-  json += "\"ics\":\"";      json += jsonEscape(g_ics);      json += "\",";
-  json += "\"lat\":\"";      json += jsonEscape(g_lat);      json += "\",";
-  json += "\"lon\":\"";      json += jsonEscape(g_lon);      json += "\",";
-  json += "\"page_ms\":";    json += String(PAGE_INTERVAL_MS); json += ",";
-  json += "\"oa_key\":\"";   json += jsonEscape(g_oa_key);   json += "\",";
-  json += "\"oa_topic\":\""; json += jsonEscape(g_oa_topic); json += "\",";
-  json += "\"rss_url\":\"";  json += jsonEscape(g_rss_url);  json += "\",";
-  json += "\"pages_mask\":"; json += String(pagesMaskFromArray()); json += ",";
-  json += "\"countdowns\":[";
-
-  for (int i = 0; i < 8; i++) {
-    if (i > 0) json += ",";
-    json += "{\"name\":\"";
-    json += jsonEscape(cd[i].name);
-    json += "\",\"when\":\"";
-    json += jsonEscape(cd[i].whenISO);
-    json += "\"}";
-  }
-  json += "]}";
-
-  web.setContentLength(json.length());
-  web.sendHeader("Content-Disposition", "attachment; filename=\"gat_config.json\"");
-  web.sendHeader("Content-Type", "application/octet-stream");
-  web.sendHeader("Connection", "close");
-
-  web.send(200);
-  web.sendContent(json);
-  web.client().stop();
-}
-
-
-// ---------------------------------------------------------------------------
-// Import configurazione da JSON (upload form)
-// ---------------------------------------------------------------------------
-static void handleImport() {
-  if (!web.hasArg("file") || web.arg("file").length() == 0) {
-    web.send(400, "text/plain", "Nessun file caricato");
-    return;
-  }
-
-  String body = web.arg("file");
-
-  auto getStr = [&](const char* key) -> String {
-    String k = String("\"") + key + "\":\"";
-    int p = body.indexOf(k);
-    if (p < 0) return "";
-    int s = p + k.length();
-    int e = body.indexOf("\"", s);
-    if (e < 0) return "";
-    return body.substring(s, e);
-  };
-
-  auto getNum = [&](const char* key) -> long {
-    String k = String("\"") + key + "\":";
-    int p = body.indexOf(k);
-    if (p < 0) return -1;
-    int s = p + k.length();
-    int e = s;
-    while (e < (int)body.length() && (isdigit(body[e]) || body[e] == '.')) e++;
-    return body.substring(s, e).toInt();
-  };
-
-  g_city = getStr("city");
-  g_lang = getStr("lang");
-  g_ics  = getStr("ics");
-  g_lat  = getStr("lat");
-  g_lon  = getStr("lon");
-
-  long ms = getNum("page_ms");
-  if (ms > 0) PAGE_INTERVAL_MS = ms;
-
-  g_from_station = getStr("from");
-  g_to_station   = getStr("to");
-
-  g_oa_key   = getStr("oa_key");
-  g_oa_topic = getStr("oa_topic");
-  g_rss_url  = getStr("rss_url");
-
-  uint16_t mask = (uint16_t)getNum("pages_mask");
-  pagesArrayFromMask(mask);
-
-  for (int i = 0; i < 8; i++) {
-    String tagN = "\"name\":\"";
-    String tagT = "\"time\":\"";
-
-    int block = body.indexOf("{", body.indexOf("\"cd\""));
-    for (int k = 0; k < i; k++)
-      block = body.indexOf("{", block + 1);
-
-    if (block < 0) break;
-
-    int bn = body.indexOf(tagN, block);
-    int bt = body.indexOf(tagT, block);
-    if (bn < 0 || bt < 0) break;
-
-    int s1 = bn + tagN.length();
-    int e1 = body.indexOf("\"", s1);
-    int s2 = bt + tagT.length();
-    int e2 = body.indexOf("\"", s2);
-
-    cd[i].name    = (e1 > s1 ? body.substring(s1, e1) : "");
-    cd[i].whenISO = (e2 > s2 ? body.substring(s2, e2) : "");
-  }
-
-  g_dataRefreshPending = true;
-
-  web.send(
-    200,
-    "text/html; charset=utf-8",
-    "<!doctype html><meta charset='utf-8'><body>"
-    "<h3>Impostazioni importate.</h3>"
-    "<p><a href='/settings'>Torna alle impostazioni</a></p>"
-    "</body>"
-  );
-}
-
-
-// ---------------------------------------------------------------------------
-// Registrazione handler in AP mode (captive portal)
-// ---------------------------------------------------------------------------
+/* ---------------------------------------------------------------------------
+   REGISTRAZIONE HANDLER (AP MODE)
+--------------------------------------------------------------------------- */
 static void startDNSCaptive() {
   dnsServer.start(DNS_PORT, "*", WiFi.softAPIP());
 }
@@ -550,21 +410,18 @@ static void startAPPortal() {
   web.on("/",       HTTP_GET,  handleRootAP);
   web.on("/save",   HTTP_POST, handleSave);
   web.on("/reboot", HTTP_GET,  handleReboot);
-  web.on("/export", HTTP_GET,  handleExport);
 
   web.onNotFound(handleRootAP);
   web.begin();
 }
 
-
-// ---------------------------------------------------------------------------
-// Registrazione handler in STA mode (WebUI completa)
-// ---------------------------------------------------------------------------
+/* ---------------------------------------------------------------------------
+   REGISTRAZIONE HANDLER (STA MODE)
+--------------------------------------------------------------------------- */
 static void startSTAWeb() {
   web.on("/",          HTTP_GET,  handleRootSTA);
   web.on("/settings",  HTTP_ANY,  handleSettings);
   web.on("/force_qod", HTTP_POST, handleForceQOD);
-  web.on("/import",    HTTP_POST, handleImport);
 
   web.onNotFound(handleRootSTA);
   web.begin();

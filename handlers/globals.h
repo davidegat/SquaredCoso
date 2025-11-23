@@ -122,6 +122,21 @@ void drawCurrentPage();
    REFRESH FLAG
 ============================================================================ */
 extern volatile bool g_dataRefreshPending;
+/* ============================================================================
+   REFRESH DISTRIBUITO (scheduler)
+============================================================================ */
+enum RefreshStep {
+  R_WEATHER,
+  R_AIR,
+  R_ICS,
+  R_BTC,
+  R_QOD,
+  R_FX,
+  R_T24,
+  R_SUN,
+  R_NEWS,
+  R_DONE
+};
 
 #endif // GLOBALS_H
 

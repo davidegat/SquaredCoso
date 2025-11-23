@@ -149,7 +149,7 @@ bool fetchNews() {
 void pageNews() {
 
   const bool it = (g_lang == "it");
-  drawHeader(it ? "Notizie" : "News");
+  drawHeader("News");
 
   const uint8_t SZ = TEXT_SCALE;
   gfx->setTextSize(SZ);
