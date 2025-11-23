@@ -73,6 +73,31 @@ Imposta la scheda ESP32-S3 con PSRAM attiva e utilizza la Board Manager entry **
 4. Al primo avvio il dispositivo espone una Wi-Fi AP con captive portal: collega un dispositivo e apri la Web UI per impostare rete, città, lingua (it/en), intervallo di rotazione, feed RSS, countdown, chiavi API (OpenAI, ecc.) e le pagine da mostrare.
 5. Salva le impostazioni: vengono scritte su NVS e riutilizzate ai riavvii. Se lat/lon sono vuoti, il firmware effettua il geocoding automatico.
 
+### Funzioni di base
+- **Ciclo di vita del display**: `displayhelpers.h` gestisce splash iniziale, fade-in/fade-out e backlight PWM su `GFX_BL`, mantenendo i buffer minimi per non saturare la PSRAM.
+- **Web server modulare**: `SquaredWeb.ino` offre captive portal in modalità AP (`/`, `/save`, `/reboot`) e Web UI completa in STA per scegliere pagine, fonti RSS, chiave OpenAI, countdown, valuta di riferimento e parametri Home Assistant.
+- **Persistenza e sincronizzazione**: le preferenze restano in NVS via `settingshandler.h`; il core (`SquaredCoso.ino`) sincronizza NTP, gestisce Wi-Fi AP/STA e lancia fetch periodici delle API (meteo, aria, FX, Bitcoin, ICS, OpenAI) con retry leggeri.
+
+### Integrazione di nuove immagini
+1. Genera un header RGB565 dell'immagine (480×480 o dimensioni più piccole) e salvalo in `images/`.
+2. Comprimi il file con l'utility `tools/compress_h_rle.py`, che produce la versione RLE in `images/compressed/` mantenendo le dimensioni originali.
+3. Includi l'header compresso nella pagina interessata e disegnalO con `drawRLE(x, y, w, h, data, runs)`, che usa un buffer di riga unico per evitare allocazioni.
+
+### Finestre/pagine disponibili
+- **Meteo** (`SquaredMeteo`): condizioni correnti e previsioni da wttr.in con particelle animate e icone RLE (sole/nuvole/pioggia).
+- **Temperatura 24H** (`SquaredTemp`): grafico statico con andamento interpolato delle temperature giornaliere da Open-Meteo.
+- **Orologio** (`SquaredClock`): ora centrale a grande formato con saluto contestuale e data completa.
+- **Calendario ICS** (`SquaredCal`): fino a tre eventi odierni ordinati per tempo residuo, scaricati dal feed ICS configurato.
+- **Countdown multipli** (`SquaredCount`): elenco di otto timer con etichetta e snake luminoso sul bordo del pannello.
+- **Qualità dell'aria** (`SquaredAir`): valori PM2.5/PM10/O₃/NO₂ da Open-Meteo con sfondo che cambia colore per fascia di qualità.
+- **Ore di luce** (`SquaredLight`): orari di alba/tramonto e durata giornaliera tramite sunrise-sunset.org.
+- **Valute/FX** (`SquaredCHF`): tabella cambi rispetto a `g_fiat` con animazione “money rain”.
+- **Bitcoin** (`SquaredCrypto`): prezzo BTC, variazione 24h e valore del portafoglio configurato.
+- **News** (`SquaredNews`): primi titoli dal feed RSS scelto, con wrapping compatto.
+- **Quote of the Day** (`SquaredSay`): frase del giorno da OpenAI (se configurata) con fallback ZenQuotes.
+- **Home Assistant** (`SquaredHA`): badge live di entità selezionate via IP/token, con refresh ogni secondo.
+- **Info di sistema** (`SquaredInfo`): dati chip, heap/PSRAM, Wi-Fi e stato servizi per debugging rapido.
+
 ### Struttura del codice
 - `SquaredCoso.ino`: core del firmware (inizializzazioni, ciclo principale, Wi-Fi, NTP, rotazione pagine, fetch dati).
 - `handlers/`: moduli di supporto per impostazioni, helper di display e variabili globali.
@@ -154,6 +179,31 @@ Enable PSRAM on the ESP32-S3 board and use the **ESP32 by Espressif Systems** pa
 3. Compile and upload the sketch to the ESP32-S3.
 4. On first boot the device exposes a Wi-Fi AP with captive portal: connect and open the Web UI to set network credentials, city, language (it/en), rotation interval, RSS feed, countdowns, API keys (OpenAI, etc.), and which pages to show.
 5. Save settings: they are stored in NVS and reused on reboot. If lat/lon are empty, the firmware performs automatic geocoding.
+
+### Core functions
+- **Display lifecycle**: `displayhelpers.h` drives the splash screen, fade-in/fade-out transitions, and PWM backlight on `GFX_BL`, keeping line buffers tiny to preserve PSRAM.
+- **Modular web server**: `SquaredWeb.ino` offers a captive portal in AP mode (`/`, `/save`, `/reboot`) and a full STA Web UI to pick pages, RSS sources, OpenAI key, countdowns, base currency, and Home Assistant settings.
+- **Persistence and sync**: preferences are persisted via `settingshandler.h`; the core (`SquaredCoso.ino`) handles NTP sync, AP/STA Wi-Fi, and periodic fetches of APIs (weather, air quality, FX, Bitcoin, ICS, OpenAI) with lightweight retries.
+
+### Adding new images
+1. Produce an RGB565 header for the asset (480×480 or smaller) and place it under `images/`.
+2. Compress it with `tools/compress_h_rle.py`; the script emits an RLE version under `images/compressed/` while preserving size metadata.
+3. Include the compressed header in the target page and render it via `drawRLE(x, y, w, h, data, runs)`, which uses a single line buffer to avoid extra allocations.
+
+### Available pages/windows
+- **Weather** (`SquaredMeteo`): current conditions and forecast from wttr.in with animated particles and RLE icons (sun/cloud/rain).
+- **24H Temperature** (`SquaredTemp`): static graph showing interpolated hourly temperatures from Open-Meteo daily means.
+- **Clock** (`SquaredClock`): large central time with context-aware greeting and full date.
+- **ICS Calendar** (`SquaredCal`): up to three same-day events ordered by time remaining, pulled from the configured ICS feed.
+- **Multiple countdowns** (`SquaredCount`): up to eight timers with labels and a perimeter “snake” animation.
+- **Air quality** (`SquaredAir`): PM2.5/PM10/O₃/NO₂ metrics from Open-Meteo with background color matching the quality band.
+- **Daylight hours** (`SquaredLight`): sunrise/sunset times and daylight duration from sunrise-sunset.org.
+- **FX rates** (`SquaredCHF`): currency table against `g_fiat` with a “money rain” animation.
+- **Bitcoin** (`SquaredCrypto`): BTC price, 24h change, and configured portfolio value.
+- **News** (`SquaredNews`): top headlines from the selected RSS feed with compact wrapping.
+- **Quote of the Day** (`SquaredSay`): daily quote via OpenAI (if configured) with ZenQuotes fallback.
+- **Home Assistant** (`SquaredHA`): live badges for filtered entities using the provided IP/token, refreshing every second.
+- **System info** (`SquaredInfo`): chip, heap/PSRAM, Wi-Fi, and service status for quick diagnostics.
 
 ### Code layout
 - `SquaredCoso.ino`: firmware core (initialization, main loop, Wi-Fi, NTP, page rotation, data fetching).
