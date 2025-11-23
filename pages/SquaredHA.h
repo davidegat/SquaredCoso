@@ -1,22 +1,21 @@
 #pragma once
 /*
 ===============================================================================
-   SQUARED — PAGINA HOME ASSISTANT (IP + TOKEN)
+   SQUARED — HOME ASSISTANT PAGE (IP + TOKEN)
    - Filtra solo entità utili
    - Friendly name max 3 parole
-   - Batterie marcate con "(Batt.)"
-   - NO SUN (escluso sempre)
-   - Badge SOLO ON/OFF (verde scuro OFF, verde chiaro ON)
-   - Temp/Umidità → NO badge
+   - Batterie marcate "(Batt.)"
+   - SUN eliminato in qualsiasi forma (ID, friendly, device_class)
+   - Badge solo ON/OFF (verde scuro OFF, verde chiaro ON)
+   - Temp/Umidità → nessun badge
    - Max 17 entità
-   - Aggiornamento LIVE ogni 1s mentre la pagina è visibile
+   - Aggiornamento LIVE ogni 1s
 ===============================================================================
 */
 
 #include <Arduino.h>
 #include <Arduino_GFX_Library.h>
 #include <WiFi.h>
-#include <Client.h>
 #include <ESPmDNS.h>
 #include <HTTPClient.h>
 #include <vector>
@@ -27,99 +26,93 @@
 // EXTERN
 // ============================================================================
 extern Arduino_RGB_Display* gfx;
-
-extern const uint16_t COL_BG;
-extern const uint16_t COL_TEXT;
-extern const uint16_t COL_ACCENT1;
-extern const uint16_t COL_DIVIDER;
-
-extern const int PAGE_X;
-extern const int PAGE_Y;
-extern const int PAGE_W;
-extern const int PAGE_H;
-
-extern const int BASE_CHAR_W;
-extern const int BASE_CHAR_H;
-extern const int TEXT_SCALE;
-
-extern void drawHeader(const String& title);
-extern void drawHLine(int y);
+extern const uint16_t COL_BG, COL_TEXT, COL_ACCENT1, COL_DIVIDER;
+extern const int PAGE_X, PAGE_Y, PAGE_W, PAGE_H;
+extern const int BASE_CHAR_W, BASE_CHAR_H, TEXT_SCALE;
 extern String sanitizeText(const String& in);
 
 // ============================================================================
-// PROTOTIPI (ordine corretto)
+// PROTOTIPI
 // ============================================================================
 bool fetchHA();
 void pageHA();
-void tickHA();     // <--- NECESSARIO
+void tickHA();
 
 // ============================================================================
 // STRUTTURA
 // ============================================================================
 struct HAEntry {
-  String id;
-  String name;
-  String state;
-  bool isBattery;
-  bool isSun;
-  bool isOnOff;
-  bool isTempHum;
+  String name;     // friendly
+  String state;    // stato normalizzato
+  bool isBattery;  // battery flag
+  bool isOnOff;    // on/off → badge
+  bool isTempHum;  // temperatura/umidità
 };
 
 static bool ha_ready = false;
 static String ha_ip;
 static std::vector<HAEntry> ha_entries;
 
-// Badge colors
-static const uint16_t HA_OFF_COLOR = 0x03E0;  // verde scuro
-static const uint16_t HA_ON_COLOR  = 0x07E0;  // verde chiaro
+// colori badge
+static const uint16_t HA_OFF_COLOR = 0x03E0;
+static const uint16_t HA_ON_COLOR  = 0x07E0;
 
-// Auto-refresh locale
+// refresh locale
 static uint32_t ha_nextPollMs = 0;
 static bool ha_dirty = true;
 
 
 // ============================================================================
-// HELPERS
+// HELPERS LEGGERI
 // ============================================================================
-static bool ha_isBatteryId(const String& id) {
+static bool isBatteryId(const String& id) {
   String s = id; s.toLowerCase();
-  return (s.indexOf("battery")  >= 0 ||
+  return (s.indexOf("battery") >= 0 ||
           s.indexOf("batteria") >= 0 ||
           s.endsWith("_bat"));
 }
 
-static bool ha_isBatteryState(String s) {
+static bool isBatteryState(String s) {
   s.toLowerCase();
-  return (s == "low" || s == "middle" || s == "medium" || s == "high");
+  return (s == "low" || s == "medium" || s == "middle" || s == "high");
 }
 
-static bool ha_isTempHum(const String& id) {
+static bool isTempHum(const String& id) {
   if (!id.startsWith("sensor.")) return false;
   String s = id; s.toLowerCase();
-  return (s.indexOf("temperature")  >= 0 ||
+  return (s.indexOf("temperature") >= 0 ||
           s.indexOf("temperatura") >= 0 ||
-          s.indexOf("humidity")    >= 0 ||
-          s.indexOf("umid")        >= 0);
+          s.indexOf("humidity") >= 0 ||
+          s.indexOf("umid") >= 0);
 }
 
+// friendly → max 3 parole
+static void trimName(String& s) {
+  int sp = 0;
+  for (int i = 0; i < s.length(); i++) {
+    if (s[i] == ' ') {
+      sp++;
+      if (sp >= 3) {
+        s = s.substring(0, i);
+        return;
+      }
+    }
+  }
+}
 
-// ============================================================================
-// NORMALIZZAZIONE
-// ============================================================================
-static String ha_normalizeState(const String& raw) {
+// normalizza stato
+static String normState(const String& raw) {
   String s = raw;
 
-  if (s == "high")   return "High";
   if (s == "low")    return "Low";
+  if (s == "high")   return "High";
   if (s == "medium") return "Middle";
   if (s == "middle") return "Middle";
 
-  bool numeric = (s.length() > 0);
-  for (int i = 0; i < s.length() && numeric; i++)
-    if (!isdigit(s[i])) numeric = false;
-
-  if (numeric) return s + "%";
+  bool num = (s.length() > 0);
+  for (int i = 0; i < s.length() && num; i++)
+    if (!isdigit(s[i])) num = false;
+  if (num) return s + "%";
 
   if (s.length()) s[0] = toupper(s[0]);
   return s;
@@ -127,22 +120,22 @@ static String ha_normalizeState(const String& raw) {
 
 
 // ============================================================================
-// FILTRO ENTITÀ (SUN escluso sempre)
+// FILTRO ENTITÀ (ESCLUDE TUTTO CIÒ CHE È SUN)
 // ============================================================================
-static bool ha_allowEntity(const String& id) {
+static bool allowEntity(const String& id, const String& fname) {
 
-  // ESCLUDI TUTTO ciò che riguarda il sole
+  // escludi tutto ciò che contiene "sun" ovunque
   {
-    String s = id;
-    s.toLowerCase();
-    if (s.startsWith("sun.") ||
-        s.indexOf("sun") >= 0 ||
-        s.indexOf("next_") >= 0)
-      return false;
+    String sid = id;     sid.toLowerCase();
+    String sfn = fname;  sfn.toLowerCase();
+
+    if (sid.indexOf("sun") >= 0) return false;
+    if (sfn.indexOf("sun") >= 0) return false;
   }
 
   if (id.startsWith("light."))  return true;
   if (id.startsWith("switch.")) return true;
+
   if (id.indexOf("_plug")   >= 0) return true;
   if (id.indexOf("_outlet") >= 0) return true;
 
@@ -150,37 +143,19 @@ static bool ha_allowEntity(const String& id) {
       id.indexOf("movimento") >= 0)
     return true;
 
-  if (ha_isBatteryId(id)) return true;
-  if (ha_isTempHum(id))   return true;
+  if (isBatteryId(id)) return true;
+  if (isTempHum(id))   return true;
 
   return false;
 }
 
 
 // ============================================================================
-// FRIENDLY NAME → max 3 parole
-// ============================================================================
-static void ha_trimFriendlyName(String& fname) {
-  int words = 0;
-  for (int i = 0; i < fname.length(); i++) {
-    if (fname[i] == ' ') {
-      words++;
-      if (words >= 3) {
-        fname = fname.substring(0, i);
-        return;
-      }
-    }
-  }
-}
-
-
-// ============================================================================
 // DISCOVERY
 // ============================================================================
-static String findHomeAssistant() {
+static String discoverHA() {
   int n = MDNS.queryService("_home-assistant", "_tcp");
-  if (n > 0) return MDNS.IP(0).toString();
-  return "";
+  return (n > 0 ? MDNS.IP(0).toString() : "");
 }
 
 
@@ -195,11 +170,11 @@ static bool fetchHAStates() {
 
   if (!g_ha_token.length()) return false;
 
-  ha_ip = g_ha_ip.length() ? g_ha_ip : findHomeAssistant();
+  ha_ip = g_ha_ip.length() ? g_ha_ip : discoverHA();
   if (!ha_ip.length()) return false;
 
   HTTPClient http;
-  http.setTimeout(4000);
+  http.setTimeout(3000);
 
   http.begin("http://" + ha_ip + ":8123/api/states");
   http.addHeader("Authorization", "Bearer " + g_ha_token);
@@ -208,7 +183,7 @@ static bool fetchHAStates() {
   String body = http.getString();
   http.end();
 
-  if (code != 200 || body.length() < 10) return false;
+  if (code != 200 || body.length() < 30) return false;
 
   int pos = 0;
 
@@ -226,8 +201,7 @@ static bool fetchHAStates() {
     String id = body.substring(a + 1, b);
     pos = b + 1;
 
-    if (!ha_allowEntity(id)) continue;
-
+    // --- STATE ---
     int sKey = body.indexOf("\"state\"", b);
     if (sKey < 0) continue;
 
@@ -238,14 +212,10 @@ static bool fetchHAStates() {
     String rawState = sanitizeText(body.substring(s0 + 1, s1));
     if (rawState == "unknown" || rawState == "unavailable") continue;
 
-    bool isTempHum = ha_isTempHum(id);
-
+    // --- FRIENDLY NAME ---
     String fname = id;
-    bool isBattery = ha_isBatteryId(id);
-
     int attrPos = body.indexOf("\"attributes\"", s1);
     if (attrPos > 0) {
-
       int fn = body.indexOf("\"friendly_name\"", attrPos);
       if (fn > 0) {
         int f0 = body.indexOf('"', fn + 16);
@@ -253,39 +223,27 @@ static bool fetchHAStates() {
         if (f0 > 0 && f1 > f0)
           fname = sanitizeText(body.substring(f0 + 1, f1));
       }
-
-      int dc = body.indexOf("\"device_class\"", attrPos);
-      if (dc > 0) {
-        int d0 = body.indexOf('"', dc + 15);
-        int d1 = body.indexOf('"', d0 + 1);
-        if (d0 > 0 && d1 > d0) {
-          String dcVal = body.substring(d0 + 1, d1);
-          dcVal.toLowerCase();
-          if (dcVal == "battery") isBattery = true;
-        }
-      }
     }
 
-    if (ha_isBatteryState(rawState))
-      isBattery = true;
+    // filtro completo (ID + friendly)
+    if (!allowEntity(id, fname)) continue;
 
-    if (isBattery)
-      fname += " (Batt.)";
+    bool isBatt = isBatteryId(id);
+    if (isBatteryState(rawState)) isBatt = true;
 
-    ha_trimFriendlyName(fname);
+    if (isBatt) fname += " (Batt.)";
+    trimName(fname);
 
-    String st = ha_normalizeState(rawState);
     bool isOnOff = (rawState == "on" || rawState == "off");
+    bool isTH    = isTempHum(id);
 
+    // aggiungi entry
     HAEntry e;
-    e.id        = id;
     e.name      = fname;
-    e.state     = st;
-    e.isBattery = isBattery;
-    e.isSun     = false;
+    e.state     = normState(rawState);
+    e.isBattery = isBatt;
     e.isOnOff   = isOnOff;
-    e.isTempHum = isTempHum;
-
+    e.isTempHum = isTH;
     ha_entries.push_back(e);
   }
 
@@ -296,37 +254,31 @@ static bool fetchHAStates() {
 
 
 // ============================================================================
-// AUTO-REFRESH LIVE
+// AUTO-REFRESH (1s)
 // ============================================================================
-static void ha_autoRefreshIfNeeded() {
+static void autoRefresh() {
   uint32_t now = millis();
   if (now >= ha_nextPollMs) {
     ha_nextPollMs = now + 1000;
-    if (fetchHAStates()) {
-      ha_dirty = true;
-    }
+    if (fetchHAStates()) ha_dirty = true;
   }
 }
 
-
-// ============================================================================
-// TICK — chiamato dal loop SOLO quando la pagina è visibile
-// ============================================================================
 void tickHA() {
-  ha_autoRefreshIfNeeded();
+  autoRefresh();
 }
 
 
 // ============================================================================
 // DRAW BADGE
 // ============================================================================
-static void ha_drawBadge(int x, int y, uint16_t col) {
+static void drawBadge(int x, int y, uint16_t col) {
   gfx->fillRoundRect(x, y, 32, BASE_CHAR_H * TEXT_SCALE, 4, col);
 }
 
 
 // ============================================================================
-// RENDER PAGINA
+// RENDER PAGINA (senza header)
 // ============================================================================
 void pageHA() {
 
@@ -339,28 +291,27 @@ void pageHA() {
   if (!ha_dirty) return;
   ha_dirty = false;
 
-  drawHeader("HOME ASSISTANT");
   gfx->setTextSize(TEXT_SCALE);
   gfx->setTextColor(COL_TEXT, COL_BG);
 
+  int y = PAGE_Y;
+
   if (ha_entries.empty()) {
-    gfx->setCursor(PAGE_X, PAGE_Y + 20);
+    gfx->setCursor(PAGE_X, y);
     gfx->print("Nessuna entita'");
     return;
   }
 
-  int y = PAGE_Y;
-
   for (auto &e : ha_entries) {
-    if (y > PAGE_Y + PAGE_H - 20)
-      break;
+
+    if (y > PAGE_Y + PAGE_H - 20) break;
 
     gfx->setCursor(PAGE_X, y);
     gfx->print(e.name);
 
     if (e.isOnOff) {
       uint16_t col = (e.state == "On" ? HA_ON_COLOR : HA_OFF_COLOR);
-      ha_drawBadge(PAGE_X + PAGE_W - 40, y - 2, col);
+      drawBadge(PAGE_X + PAGE_W - 40, y - 2, col);
     } else {
       int tw = e.state.length() * BASE_CHAR_W * TEXT_SCALE;
       gfx->setCursor(PAGE_X + PAGE_W - tw, y);
