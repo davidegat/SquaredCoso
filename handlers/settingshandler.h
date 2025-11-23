@@ -18,11 +18,11 @@
 // Chiavi POST associate alle checkbox delle pagine
 static const char* PAGE_KEYS[PAGES] = {
   "p_WEATHER", "p_AIR", "p_CLOCK", "p_CAL", "p_BTC",
-  "p_QOD", "p_INFO", "p_COUNT", "p_FX", "p_T24", "p_SUN",
-  "p_NEWS"   // ← NUOVA PAGINA
+  "p_QOD", "p_INFO", "p_COUNT", "p_FX", "p_T24",
+  "p_SUN", "p_NEWS", "p_HA"
 };
 
-extern WebServer web;
+extern WebServer   web;
 extern Preferences prefs;
 
 
@@ -64,6 +64,29 @@ void handleSettings() {
       g_fiat.toUpperCase();
     }
 
+    // --------------------- Home Assistant: IP ---------------------
+    if (web.hasArg("ha_ip")) {
+      g_ha_ip = sanitizeText(web.arg("ha_ip"));
+      g_ha_ip.trim();
+
+      // Rimuove “http://” o “https://”
+      if (g_ha_ip.startsWith("http://"))
+        g_ha_ip.remove(0, 7);
+
+      if (g_ha_ip.startsWith("https://"))
+        g_ha_ip.remove(0, 8);
+
+      // Rimuove eventuale "/" finale
+      if (g_ha_ip.endsWith("/"))
+        g_ha_ip.remove(g_ha_ip.length() - 1);
+    }
+
+    // --------------------- Home Assistant: TOKEN ---------------------
+    if (web.hasArg("ha_token")) {
+      g_ha_token = sanitizeText(web.arg("ha_token"));
+      g_ha_token.trim();
+    }
+
     // --------------------- BTC ---------------------
     if (web.hasArg("btc_owned")) {
       String s = web.arg("btc_owned");
@@ -75,12 +98,12 @@ void handleSettings() {
     g_oa_key   = sanitizeText(web.arg("openai_key"));
     g_oa_topic = sanitizeText(web.arg("openai_topic"));
 
-
     // --------------------- RSS URL ---------------------
     if (web.hasArg("rss_url")) {
-        g_rss_url = sanitizeText(web.arg("rss_url"));
-        g_rss_url.trim();
-    	}
+      g_rss_url = sanitizeText(web.arg("rss_url"));
+      g_rss_url.trim();
+    }
+
     // --------------------- Countdown (8 elementi) ---------------------
     for (int i = 0; i < 8; i++) {
       char kn[6], kt[6];
@@ -96,21 +119,26 @@ void handleSettings() {
 
     // Almeno CLOCK deve restare attivo
     bool any = false;
-    for (int i = 0; i < PAGES; i++)
-      if (g_show[i]) any = true;
-
+    for (int i = 0; i < PAGES; i++) {
+      if (g_show[i]) {
+        any = true;
+        break;
+      }
+    }
     if (!any)
       g_show[P_CLOCK] = true;
 
     // --------------------- SALVATAGGIO NVS ---------------------
     prefs.begin("app", false);
 
-    prefs.putString("city", g_city);
-    prefs.putString("lang", g_lang);
-    prefs.putString("ics",  g_ics);
-    prefs.putString("lat",  g_lat);
-    prefs.putString("lon",  g_lon);
+    prefs.putString("city",    g_city);
+    prefs.putString("lang",    g_lang);
+    prefs.putString("ics",     g_ics);
+    prefs.putString("lat",     g_lat);
+    prefs.putString("lon",     g_lon);
     prefs.putString("rss_url", g_rss_url);
+    prefs.putString("ha_ip",   g_ha_ip);
+    prefs.putString("ha_token", g_ha_token);
 
     prefs.putULong("page_ms", PAGE_INTERVAL_MS);
 
@@ -157,13 +185,29 @@ void loadAppConfig() {
   g_lat  = prefs.getString("lat",  g_lat);
   g_lon  = prefs.getString("lon",  g_lon);
 
+  g_ha_ip    = prefs.getString("ha_ip", "");
+  g_ha_token = prefs.getString("ha_token", "");
+
+  g_ha_ip.trim();
+  g_ha_token.trim();
+
+  // Normalizza l’IP rimuovendo protocolli o slash finali
+  if (g_ha_ip.startsWith("http://"))
+    g_ha_ip.remove(0, 7);
+
+  if (g_ha_ip.startsWith("https://"))
+    g_ha_ip.remove(0, 8);
+
+  if (g_ha_ip.endsWith("/"))
+    g_ha_ip.remove(g_ha_ip.length() - 1);
+
   PAGE_INTERVAL_MS = prefs.getULong("page_ms", PAGE_INTERVAL_MS);
 
   g_oa_key   = prefs.getString("oa_key",   g_oa_key);
   g_oa_topic = prefs.getString("oa_topic", g_oa_topic);
+
   g_rss_url = prefs.getString("rss_url", g_rss_url);
   g_rss_url.trim();
-
 
   for (int i = 0; i < 8; i++) {
     char kn[6], kt[6];
@@ -202,6 +246,9 @@ void saveAppConfig() {
   prefs.putString("ics",  g_ics);
   prefs.putString("lat",  g_lat);
   prefs.putString("lon",  g_lon);
+  prefs.putString("rss_url", g_rss_url);
+  prefs.putString("ha_ip",   g_ha_ip);
+  prefs.putString("ha_token", g_ha_token);
 
   prefs.putULong("page_ms", PAGE_INTERVAL_MS);
 

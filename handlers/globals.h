@@ -38,6 +38,7 @@ enum Page {
   P_T24,
   P_SUN,
   P_NEWS,
+  P_HA,    // <-- NUOVA PAGINA Home Assistant
   PAGES
 };
 
@@ -81,6 +82,8 @@ extern bool jsonFindStringKV(const String& body,
                              const String& key,
                              int from,
                              String& outVal);
+extern String g_ha_ip;
+extern String g_ha_token;
 
 /* ============================================================================
    VARIABILI GRAFICHE (DEFINITE COME CONST NEL .INO)
@@ -122,6 +125,7 @@ void drawCurrentPage();
    REFRESH FLAG
 ============================================================================ */
 extern volatile bool g_dataRefreshPending;
+
 /* ============================================================================
    REFRESH DISTRIBUITO (scheduler)
 ============================================================================ */
@@ -135,6 +139,7 @@ enum RefreshStep {
   R_T24,
   R_SUN,
   R_NEWS,
+  R_HA,     // <-- NUOVO STEP Home Assistant
   R_DONE
 };
 

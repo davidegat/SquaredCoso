@@ -78,8 +78,7 @@ static void handleSave() {
       200,
       "text/html; charset=utf-8",
       "<!doctype html><meta charset='utf-8'><body><h3>Salvate. Mi connetto…</h3>"
-      "<script>setTimeout(()=>{fetch('/reboot')},800);</script></body>"
-    );
+      "<script>setTimeout(()=>{fetch('/reboot')},800);</script></body>");
   } else {
     web.send(400, "text/plain; charset=utf-8", "Bad Request");
   }
@@ -143,42 +142,40 @@ String htmlSettings(bool saved, const String& msg) {
 
   const bool it = (g_lang == "it");
 
-  const char* t_title   = it ? "Impostazioni" : "Settings";
-  const char* t_saved   = it ? "Impostazioni salvate. Ricarico…" :
-                               "Settings saved. Reloading…";
+  const char* t_title = it ? "Impostazioni" : "Settings";
+  const char* t_saved = it ? "Impostazioni salvate. Ricarico…" : "Settings saved. Reloading…";
 
   const char* t_general = it ? "Generale" : "General";
-  const char* t_city    = it ? "Città" : "City";
-  const char* t_lang    = it ? "Lingua (it/en)" : "Language (it/en)";
-  const char* t_ics     = it ? "URL Calendario ICS" : "ICS Calendar URL";
-  const char* t_pageint = it ? "Tempo cambio pagina (secondi)" :
-                               "Page switch interval (seconds)";
+  const char* t_city = it ? "Città" : "City";
+  const char* t_lang = it ? "Lingua (it/en)" : "Language (it/en)";
+  const char* t_ics = it ? "URL Calendario ICS" : "ICS Calendar URL";
+  const char* t_pageint = it ? "Tempo cambio pagina (secondi)" : "Page switch interval (seconds)";
 
-  const char* t_qod      = it ? "Frase del giorno" : "Quote of the Day";
-  const char* t_qoddesc  = it ? "Se imposti la chiave OpenAI userò GPT. Altrimenti ZenQuotes."
-                              : "If you set the OpenAI key, GPT will be used. Otherwise ZenQuotes.";
-  const char* t_oa_key   = "OpenAI API Key";
+  const char* t_qod = it ? "Frase del giorno" : "Quote of the Day";
+  const char* t_qoddesc = it ? "Se imposti la chiave OpenAI userò GPT. Altrimenti ZenQuotes."
+                             : "If you set the OpenAI key, GPT will be used. Otherwise ZenQuotes.";
+  const char* t_oa_key = "OpenAI API Key";
   const char* t_oa_topic = it ? "Argomento frase" : "Quote topic";
-  const char* t_force    = it ? "Richiedi nuova frase" : "Get new quote";
+  const char* t_force = it ? "Richiedi nuova frase" : "Get new quote";
 
-  const char* t_btc      = "Bitcoin";
-  const char* t_btc_amt  = it ? "Quantità BTC posseduti" : "Owned BTC amount";
+  const char* t_btc = "Bitcoin";
+  const char* t_btc_amt = it ? "Quantità BTC posseduti" : "Owned BTC amount";
 
-  const char* t_rss       = "RSS News";
+  const char* t_rss = "RSS News";
   const char* t_rss_label = "RSS feed";
-  const char* t_rss_hint  = it ? "Lascia vuoto per usare il feed predefinito."
-                               : "Leave empty to use the default feed.";
+  const char* t_rss_hint = it ? "Lascia vuoto per usare il feed predefinito."
+                              : "Leave empty to use the default feed.";
 
-  const char* t_pages    = it ? "Pagine visibili" : "Visible pages";
-  const char* t_hint2    = it ? "Se le disattivi tutte, l'orologio resta comunque attivo."
-                              : "If you disable all, the clock will still remain active.";
+  const char* t_pages = it ? "Pagine visibili" : "Visible pages";
+  const char* t_hint2 = it ? "Se le disattivi tutte, l'orologio resta comunque attivo."
+                           : "If you disable all, the clock will still remain active.";
 
-  const char* t_count    = "Countdowns (max 8)";
-  const char* t_name     = it ? "Nome #" : "Name #";
-  const char* t_time     = it ? "Data/Ora #" : "Date/Time #";
+  const char* t_count = "Countdowns (max 8)";
+  const char* t_name = it ? "Nome #" : "Name #";
+  const char* t_time = it ? "Data/Ora #" : "Date/Time #";
 
-  const char* t_savebtn  = it ? "Salva" : "Save";
-  const char* t_home     = "Home";
+  const char* t_savebtn = it ? "Salva" : "Save";
+  const char* t_home = "Home";
 
   String notice;
   if (saved) {
@@ -240,102 +237,135 @@ String htmlSettings(bool saved, const String& msg) {
   page += "<form method='POST' action='/settings'>";
 
   page += "<div class='card'><h3>" + String(t_general) + "</h3>"
-          "<div class='row'>"
+                                                         "<div class='row'>"
 
-          "<div><label>" + String(t_city) + "</label>"
-          "<input name='city' value='" + sanitizeText(g_city) + "'/></div>"
+                                                         "<div><label>"
+          + String(t_city) + "</label>"
+                             "<input name='city' value='"
+          + sanitizeText(g_city) + "'/></div>"
 
-          "<div><label>" + String(t_lang) + "</label>"
-          "<input name='lang' value='" + sanitizeText(g_lang) + "'/></div>"
-          "</div>"
+                                   "<div><label>"
+          + String(t_lang) + "</label>"
+                             "<input name='lang' value='"
+          + sanitizeText(g_lang) + "'/></div>"
+                                   "</div>"
 
-          "<label>" + String(t_ics) + "</label>"
-          "<input name='ics' value='" + sanitizeText(g_ics) + "'/>"
+                                   "<label>"
+          + String(t_ics) + "</label>"
+                            "<input name='ics' value='"
+          + sanitizeText(g_ics) + "'/>"
 
-          "<label>" + String(t_pageint) + "</label>"
-          "<input name='page_s' type='number' min='5' max='600' value='" +
-          String(page_s) + "'/>"
+                                  "<label>"
+          + String(t_pageint) + "</label>"
+                                "<input name='page_s' type='number' min='5' max='600' value='"
+          + String(page_s) + "'/>"
 
-          "<label>Valuta base:</label>"
-          "<select name='fiat'>"
-          "<option value='CHF' " + String(g_fiat == "CHF" ? "selected" : "") + ">CHF</option>"
-          "<option value='EUR' " + String(g_fiat == "EUR" ? "selected" : "") + ">EUR</option>"
-          "<option value='USD' " + String(g_fiat == "USD" ? "selected" : "") + ">USD</option>"
-          "<option value='GBP' " + String(g_fiat == "GBP" ? "selected" : "") + ">GBP</option>"
-          "</select>"
+                             "<label>Valuta base:</label>"
+                             "<select name='fiat'>"
+                             "<option value='CHF' "
+          + String(g_fiat == "CHF" ? "selected" : "") + ">CHF</option>"
+                                                        "<option value='EUR' "
+          + String(g_fiat == "EUR" ? "selected" : "") + ">EUR</option>"
+                                                        "<option value='USD' "
+          + String(g_fiat == "USD" ? "selected" : "") + ">USD</option>"
+                                                        "<option value='GBP' "
+          + String(g_fiat == "GBP" ? "selected" : "") + ">GBP</option>"
+                                                        "</select>"
 
-          "</div>";
+                                                        "</div>";
 
   page += "<div class='card'><h3>" + String(t_qod) + "</h3>"
-          "<p style='opacity:.7;font-size:.9rem'>" + String(t_qoddesc) + "</p>"
+                                                     "<p style='opacity:.7;font-size:.9rem'>"
+          + String(t_qoddesc) + "</p>"
 
-          "<label>" + String(t_oa_key) + "</label>"
-          "<input name='openai_key' type='password' value='" +
-          sanitizeText(g_oa_key) + "'/>"
+                                "<label>"
+          + String(t_oa_key) + "</label>"
+                               "<input name='openai_key' type='password' value='"
+          + sanitizeText(g_oa_key) + "'/>"
 
-          "<label>" + String(t_oa_topic) + "</label>"
-          "<input name='openai_topic' value='" +
-          sanitizeText(g_oa_topic) + "'/>"
+                                     "<label>"
+          + String(t_oa_topic) + "</label>"
+                                 "<input name='openai_topic' value='"
+          + sanitizeText(g_oa_topic) + "'/>"
 
-          "<p style='margin-top:14px'>"
-          "<button class='btn ghost' formaction='/force_qod' formmethod='POST'>" +
-          String(t_force) + "</button></p>"
-          "</div>";
+                                       "<p style='margin-top:14px'>"
+                                       "<button class='btn ghost' formaction='/force_qod' formmethod='POST'>"
+          + String(t_force) + "</button></p>"
+                              "</div>";
 
   page += "<div class='card'><h3>" + String(t_btc) + "</h3>"
-          "<label>" + String(t_btc_amt) + "</label>"
-          "<input name='btc_owned' type='number' step='0.00000001' value='";
+                                                     "<label>"
+          + String(t_btc_amt) + "</label>"
+                                "<input name='btc_owned' type='number' step='0.00000001' value='";
 
   if (!isnan(g_btc_owned))
     page += String(g_btc_owned, 8);
 
   page += "'/></div>";
+  page += "<div class='card'><h3>Home Assistant</h3>";
 
+  page += "<label>IP Home Assistant</label>"
+          "<input name='ha_ip' value='"
+          + sanitizeText(g_ha_ip) + "'/>";
+
+  page += "<label>Token (Long-Lived Access Token)</label>"
+          "<input name='ha_token' type='password' value='"
+          + sanitizeText(g_ha_token) + "'/>";
+
+  page += "</div>";
   page += "<div class='card'><h3>" + String(t_rss) + "</h3>"
-          "<p style='opacity:.7;font-size:.9rem'>" + String(t_rss_hint) + "</p>"
-          "<label>" + String(t_rss_label) + "</label>"
-          "<input name='rss_url' value='" + sanitizeText(g_rss_url) + "'/></div>";
+                                                     "<p style='opacity:.7;font-size:.9rem'>"
+          + String(t_rss_hint) + "</p>"
+                                 "<label>"
+          + String(t_rss_label) + "</label>"
+                                  "<input name='rss_url' value='"
+          + sanitizeText(g_rss_url) + "'/></div>";
 
   page += "<div class='card'><h3>" + String(t_pages) + "</h3><div class='grid'>";
 
   page += checkbox("p_WEATHER", g_show[P_WEATHER], it ? "Meteo" : "Weather");
-  page += checkbox("p_AIR",     g_show[P_AIR],     it ? "Qualità aria" : "Air quality");
-  page += checkbox("p_CLOCK",   g_show[P_CLOCK],   it ? "Orologio" : "Clock");
-  page += checkbox("p_CAL",     g_show[P_CAL],     it ? "Calendario ICS" : "ICS Calendar");
-  page += checkbox("p_BTC",     g_show[P_BTC],     "Bitcoin");
-  page += checkbox("p_QOD",     g_show[P_QOD],     it ? "Frase del giorno" : "Quote of the Day");
-  page += checkbox("p_INFO",    g_show[P_INFO],    "Info");
-  page += checkbox("p_COUNT",   g_show[P_COUNT],   "Countdown");
-  page += checkbox("p_FX",      g_show[P_FX],      it ? "Valute" : "Currency");
-  page += checkbox("p_T24",     g_show[P_T24],     it ? "Temperatura 24h" : "24h Temperature");
-  page += checkbox("p_SUN",     g_show[P_SUN],     it ? "Ore di luce" : "Sunlight hours");
-  page += checkbox("p_NEWS",    g_show[P_NEWS],    "RSS News");
+  page += checkbox("p_AIR", g_show[P_AIR], it ? "Qualità aria" : "Air quality");
+  page += checkbox("p_CLOCK", g_show[P_CLOCK], it ? "Orologio" : "Clock");
+  page += checkbox("p_CAL", g_show[P_CAL], it ? "Calendario ICS" : "ICS Calendar");
+  page += checkbox("p_BTC", g_show[P_BTC], "Bitcoin");
+  page += checkbox("p_QOD", g_show[P_QOD], it ? "Frase del giorno" : "Quote of the Day");
+  page += checkbox("p_INFO", g_show[P_INFO], "Info");
+  page += checkbox("p_COUNT", g_show[P_COUNT], "Countdown");
+  page += checkbox("p_FX", g_show[P_FX], it ? "Valute" : "Currency");
+  page += checkbox("p_T24", g_show[P_T24], it ? "Temperatura 24h" : "24h Temperature");
+  page += checkbox("p_SUN", g_show[P_SUN], it ? "Ore di luce" : "Sunlight hours");
+  page += checkbox("p_NEWS", g_show[P_NEWS], "RSS News");
+  page += checkbox("p_HA", g_show[P_HA], "Home Assistant");
+
 
   page += "</div>"
-          "<p style='opacity:.6;font-size:.85rem;margin-top:8px'>" +
-          String(t_hint2) + "</p></div>";
+          "<p style='opacity:.6;font-size:.85rem;margin-top:8px'>"
+          + String(t_hint2) + "</p></div>";
 
   page += "<div class='card'><h3>" + String(t_count) + "</h3>";
 
   for (int i = 0; i < 8; i++) {
     page += "<div class='row'>"
 
-            "<div><label>" + String(t_name) + String(i + 1) + "</label>"
-            "<input name='cd" + String(i + 1) + "n' value='" +
-            sanitizeText(cd[i].name) + "'/></div>"
+            "<div><label>"
+            + String(t_name) + String(i + 1) + "</label>"
+                                               "<input name='cd"
+            + String(i + 1) + "n' value='" + sanitizeText(cd[i].name) + "'/></div>"
 
-            "<div><label>" + String(t_time) + String(i + 1) + "</label>"
-            "<input name='cd" + String(i + 1) + "t' type='datetime-local' value='" +
-            sanitizeText(cd[i].whenISO) + "'/></div>"
+                                                                        "<div><label>"
+            + String(t_time) + String(i + 1) + "</label>"
+                                               "<input name='cd"
+            + String(i + 1) + "t' type='datetime-local' value='" + sanitizeText(cd[i].whenISO) + "'/></div>"
 
-            "</div>";
+                                                                                                 "</div>";
   }
 
   page += "<p style='margin-top:14px'>"
-          "<button class='btn primary' type='submit'>" + String(t_savebtn) +
-          "</button> "
-          "<a class='btn ghost' href='/'>" + String(t_home) + "</a>"
-          "</p></form></div>";
+          "<button class='btn primary' type='submit'>"
+          + String(t_savebtn) + "</button> "
+                                "<a class='btn ghost' href='/'>"
+          + String(t_home) + "</a>"
+                             "</p></form></div>";
 
   page += "</main></body></html>";
   return page;
@@ -350,8 +380,10 @@ static String htmlHome() {
 
   const char* names[PAGES] = {
     "Meteo", "Aria", "Orologio", "Calendario",
-    "BTC", "Frase", "Info", "Countdown", "FX", "T24", "Sun", "News"
+    "BTC", "Frase", "Info", "Countdown",
+    "FX", "T24", "Sun", "News", "Home Assistant"
   };
+
 
   for (int i = 0; i < PAGES; i++) {
     if (g_show[i]) {
@@ -371,19 +403,14 @@ static String htmlHome() {
           "</style></head><body>"
           "<h2>Gat Multi Ticker</h2>";
 
-  page += "<p><b>Citta:</b> " + sanitizeText(g_city) +
-          "<br><b>Lingua:</b> " + sanitizeText(g_lang) +
-          "<br><b>Intervallo cambio pagina:</b> " + String(s) + " s</p>";
+  page += "<p><b>Citta:</b> " + sanitizeText(g_city) + "<br><b>Lingua:</b> " + sanitizeText(g_lang) + "<br><b>Intervallo cambio pagina:</b> " + String(s) + " s</p>";
 
   page += "<p><b>Pagine attive:</b> " + enabledList + "</p>";
 
-  page += "<p><b>Collegamento:</b> " +
-          sanitizeText(g_from_station) + " → " +
-          sanitizeText(g_to_station) + "</p>";
+  page += "<p><b>Collegamento:</b> " + sanitizeText(g_from_station) + " → " + sanitizeText(g_to_station) + "</p>";
 
   if (g_oa_key.length()) {
-    page += "<p><b>Quote of the day:</b> OpenAI (tema: " +
-            sanitizeText(g_oa_topic) + ")</p>";
+    page += "<p><b>Quote of the day:</b> OpenAI (tema: " + sanitizeText(g_oa_topic) + ")</p>";
   } else {
     page += "<p><b>Quote of the day:</b> ZenQuotes (default)</p>";
   }
@@ -407,9 +434,9 @@ static void startDNSCaptive() {
 }
 
 static void startAPPortal() {
-  web.on("/",       HTTP_GET,  handleRootAP);
-  web.on("/save",   HTTP_POST, handleSave);
-  web.on("/reboot", HTTP_GET,  handleReboot);
+  web.on("/", HTTP_GET, handleRootAP);
+  web.on("/save", HTTP_POST, handleSave);
+  web.on("/reboot", HTTP_GET, handleReboot);
 
   web.onNotFound(handleRootAP);
   web.begin();
@@ -419,8 +446,8 @@ static void startAPPortal() {
    REGISTRAZIONE HANDLER (STA MODE)
 --------------------------------------------------------------------------- */
 static void startSTAWeb() {
-  web.on("/",          HTTP_GET,  handleRootSTA);
-  web.on("/settings",  HTTP_ANY,  handleSettings);
+  web.on("/", HTTP_GET, handleRootSTA);
+  web.on("/settings", HTTP_ANY, handleSettings);
   web.on("/force_qod", HTTP_POST, handleForceQOD);
 
   web.onNotFound(handleRootSTA);

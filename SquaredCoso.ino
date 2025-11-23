@@ -67,6 +67,7 @@ int indexOfCI(const String& src, const String& key, int from = 0);
 #include "pages/SquaredAir.h"
 #include "pages/SquaredCrypto.h"
 #include "pages/SquaredNews.h"
+#include "pages/SquaredHA.h"
 
 // -----------------------------------------------------------------------------
 // CONFIG APPLICAZIONE / STATO GLOBALE (persistenza via NVS)
@@ -78,6 +79,8 @@ String g_ics = "";
 String g_lat = "";
 String g_lon = "";
 uint32_t PAGE_INTERVAL_MS = 15000;
+String g_ha_ip = "";
+String g_ha_token = "";
 
 String g_from_station = "Bellinzona";
 String g_to_station = "Lugano";
@@ -344,6 +347,7 @@ void drawCurrentPage() {
     case P_T24: pageTemp24(); break;
     case P_SUN: pageSun(); break;
     case P_NEWS: pageNews(); break;
+    case P_HA: pageHA(); break;
   }
 }
 
@@ -376,6 +380,7 @@ void refreshAll() {
   if (g_show[P_T24]) fetchTemp24();
   if (g_show[P_SUN]) fetchSun();
   if (g_show[P_NEWS]) fetchNews();
+  if (g_show[P_HA]) fetchHA();
 
   if (g_bootPhase) return;
 
@@ -498,17 +503,18 @@ void loop() {
         refreshStep = R_ICS;
         break;
 
-      case R_ICS: {
-        bool ok = fetchICS();
-        bool anyEvent = false;
+      case R_ICS:
+        {
+          bool ok = fetchICS();
+          bool anyEvent = false;
 
-        for (int i = 0; i < 3; i++)
-          if (cal[i].used) anyEvent = true;
+          for (int i = 0; i < 3; i++)
+            if (cal[i].used) anyEvent = true;
 
-        g_show[P_CAL] = ok && anyEvent;
-        refreshStep = R_BTC;
-        break;
-      }
+          g_show[P_CAL] = ok && anyEvent;
+          refreshStep = R_BTC;
+          break;
+        }
 
       case R_BTC:
         if (g_show[P_BTC]) fetchCryptoWrapper();
@@ -537,7 +543,12 @@ void loop() {
 
       case R_NEWS:
         if (g_show[P_NEWS]) fetchNews();
-        refreshStep = R_DONE;
+        refreshStep = R_HA;  // <-- CORRETTO
+        break;
+
+      case R_HA:
+        if (g_show[P_HA]) fetchHA();
+        refreshStep = R_DONE;  // dopo HA → fine ciclo
         break;
 
       case R_DONE:
@@ -549,6 +560,7 @@ void loop() {
     refreshDelay = millis() + 200;
   }
 
+
   // ---------------------------------------------------------------------------
   // ROTAZIONE PAGINE AUTOMATICA
   // ---------------------------------------------------------------------------
@@ -557,7 +569,7 @@ void loop() {
     quickFadeOut();
 
     int oldPage = g_page;
-    bool ok     = advanceToNextEnabled();
+    bool ok = advanceToNextEnabled();
 
     if (ok && g_page == P_T24 && oldPage != P_T24)
       resetTemp24Anim();
@@ -616,4 +628,3 @@ void loop() {
 
   delay(5);
 }
-
