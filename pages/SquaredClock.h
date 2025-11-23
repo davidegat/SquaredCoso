@@ -3,14 +3,6 @@
 #include <Arduino.h>
 #include <time.h>
 
-// ---------------------------------------------------------------------------
-// SquaredCoso – Pagina OROLOGIO
-// - Mostra ora centrale gigante HH:MM con due punti custom
-// - Header con saluto contestuale (IT/EN) in base all’ora del giorno
-// - Sotto: data completa e giorno della settimana, centrati
-// - Nessuna alloc dinamica, solo piccoli buffer su stack
-// ---------------------------------------------------------------------------
-
 // font / rendering condivisi
 extern void drawBoldMain(int16_t x, int16_t y, const String& raw);
 extern void drawBoldMain(int16_t x, int16_t y, const String& raw, uint8_t scale);
@@ -27,14 +19,14 @@ extern const int BASE_CHAR_W;
 extern const int BASE_CHAR_H;
 extern const int TEXT_SCALE;
 
-extern void drawHeader(const String& title);
 extern void drawHLine(int y);
 
 extern String g_lang;
 
-// ---------------------------------------------------------------------------
-// Pagina orologio digitale full-screen (ora + data + weekday)
-// ---------------------------------------------------------------------------
+
+// ============================================================================
+// CLOCK FULLSCREEN – niente header, solo ora + data + weekday
+// ============================================================================
 inline void pageClock() {
   time_t now;
   struct tm t;
@@ -42,82 +34,85 @@ inline void pageClock() {
   time(&now);
   localtime_r(&now, &t);
 
-  const int minutes = t.tm_hour * 60 + t.tm_min;
-  const char* greet_it;
-  const char* greet_en;
-
-  if (minutes < 360) {
-    greet_it = "Buonanotte!";
-    greet_en = "Good night!";
-  } else if (minutes < 690) {
-    greet_it = "Buongiorno!";
-    greet_en = "Good morning!";
-  } else if (minutes < 840) {
-    greet_it = "Buon appetito!";
-    greet_en = "Lunch time!";
-  } else if (minutes < 1080) {
-    greet_it = "Buon pomeriggio!";
-    greet_en = "Good afternoon!";
-  } else if (minutes < 1320) {
-    greet_it = "Buonasera!";
-    greet_en = "Good evening!";
-  } else {
-    greet_it = "Buonanotte!";
-    greet_en = "Good night!";
-  }
-
-  drawHeader(g_lang == "it" ? greet_it : greet_en);
-
+  // ---------------------------------------------------------------------------
+  // buffer ora e data
+  // ---------------------------------------------------------------------------
   char bufH[3];
   char bufM[3];
   char bufD[16];
 
   snprintf(bufH, sizeof(bufH), "%02d", t.tm_hour);
   snprintf(bufM, sizeof(bufM), "%02d", t.tm_min);
+
   snprintf(bufD, sizeof(bufD), "%02d/%02d/%04d",
            t.tm_mday, t.tm_mon + 1, t.tm_year + 1900);
 
-  const int scale   = 14;
-  const int cw      = BASE_CHAR_W * scale;
-  const int ch      = BASE_CHAR_H * scale;
-  const int colonW  = cw;
-  const int clockY  = PAGE_Y + 40;
-  const int totalW  = cw * 2 + colonW + cw * 2;
-  const int clockX  = (480 - totalW) >> 1;
+  // ---------------------------------------------------------------------------
+  // parametri grafici orologio gigante
+  // ---------------------------------------------------------------------------
+  const int scale  = 14;
+  const int cw     = BASE_CHAR_W * scale;
+  const int ch     = BASE_CHAR_H * scale;
+  const int colonW = cw;
+  const int totalW = cw * 2 + colonW + cw * 2;
 
-  gfx->fillRect(0, clockY - 5, 480, ch + 150, COL_BG);
+  const int clockX = (480 - totalW) >> 1;
+  const int clockY = 40;  // molto più in alto → fullscreen
 
-  gfx->setTextColor(COL_TEXT, COL_BG);
+  gfx->fillScreen(COL_BG);
+
   gfx->setTextSize(scale);
+  gfx->setTextColor(COL_TEXT, COL_BG);
 
+  // ---------------------------------------------------------------------------
+  // ORE (HH)
+  // ---------------------------------------------------------------------------
   gfx->setCursor(clockX, clockY);
   gfx->print(bufH);
 
+  // ---------------------------------------------------------------------------
+  // Due punti custom
+  // ---------------------------------------------------------------------------
   {
-    const int colonX   = clockX + cw * 2;
-    const int dotW     = (colonW / 6 > 4) ? (colonW / 6) : 4;
-    const int dotH     = (ch / 8   > 4) ? (ch / 8)       : 4;
-    const int centerX  = colonX + ((colonW - dotW) >> 1);
-    const int upY      = clockY + (ch * 27) / 100;
-    const int dnY      = clockY + (ch * 62) / 100;
+    const int colonX  = clockX + cw * 2;
+    const int dotW    = max(colonW / 6, 4);
+    const int dotH    = max(ch / 8, 4);
+    const int cx      = colonX + ((colonW - dotW) >> 1);
 
-    gfx->fillRect(centerX, upY, dotW, dotH, COL_ACCENT1);
-    gfx->fillRect(centerX, dnY, dotW, dotH, COL_ACCENT1);
+    const int upY = clockY + (ch * 27) / 100;
+    const int dnY = clockY + (ch * 62) / 100;
+
+    gfx->fillRect(cx, upY, dotW, dotH, COL_ACCENT1);
+    gfx->fillRect(cx, dnY, dotW, dotH, COL_ACCENT1);
   }
 
+  // ---------------------------------------------------------------------------
+  // MINUTI (MM)
+  // ---------------------------------------------------------------------------
   gfx->setCursor(clockX + cw * 2 + colonW, clockY);
   gfx->print(bufM);
 
-  const int sepY = clockY + ch + 18;
+  // ---------------------------------------------------------------------------
+  // Separatore orizzontale
+  // ---------------------------------------------------------------------------
+  const int sepY = clockY + ch + 20;
   drawHLine(sepY);
 
+  // ---------------------------------------------------------------------------
+  // Data
+  // ---------------------------------------------------------------------------
   gfx->setTextSize(5);
+  gfx->setTextColor(COL_TEXT, COL_BG);
+
   const int dateW = strlen(bufD) * BASE_CHAR_W * 5;
-  const int dateY = sepY + 28;
+  const int dateY = sepY + 30;
 
   gfx->setCursor((480 - dateW) >> 1, dateY);
   gfx->print(bufD);
 
+  // ---------------------------------------------------------------------------
+  // Giorno della settimana
+  // ---------------------------------------------------------------------------
   static const char it_wd[7][12] PROGMEM = {
     "Domenica","Lunedi","Martedi","Mercoledi",
     "Giovedi","Venerdi","Sabato"
@@ -134,11 +129,12 @@ inline void pageClock() {
     strcpy_P(wd, en_wd[t.tm_wday]);
   }
 
-  const int weekdayY = dateY + (BASE_CHAR_H * 5) + 20;
-
   gfx->setTextSize(4);
+
   const int wdW = strlen(wd) * BASE_CHAR_W * 4;
-  gfx->setCursor((480 - wdW) >> 1, weekdayY);
+  const int wdY = dateY + (BASE_CHAR_H * 5) + 28;
+
+  gfx->setCursor((480 - wdW) >> 1, wdY);
   gfx->print(wd);
 
   gfx->setTextSize(TEXT_SCALE);
