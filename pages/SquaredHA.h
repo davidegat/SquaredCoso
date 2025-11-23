@@ -5,7 +5,7 @@
    - Filtra solo entità utili
    - Friendly name max 3 parole
    - Batterie marcate con "(Batt.)"
-   - SUN abbreviato (Above/Below/Rising/Setting)
+   - NO SUN (escluso sempre)
    - Badge SOLO ON/OFF (verde scuro OFF, verde chiaro ON)
    - Temp/Umidità → NO badge
    - Max 17 entità
@@ -47,11 +47,11 @@ extern void drawHLine(int y);
 extern String sanitizeText(const String& in);
 
 // ============================================================================
-// PROTOTIPI
+// PROTOTIPI (ordine corretto)
 // ============================================================================
 bool fetchHA();
 void pageHA();
-
+void tickHA();     // <--- NECESSARIO
 
 // ============================================================================
 // STRUTTURA
@@ -76,7 +76,7 @@ static const uint16_t HA_ON_COLOR  = 0x07E0;  // verde chiaro
 
 // Auto-refresh locale
 static uint32_t ha_nextPollMs = 0;
-static bool ha_dirty = true;   // forza ridisegno alla prima draw
+static bool ha_dirty = true;
 
 
 // ============================================================================
@@ -107,14 +107,6 @@ static bool ha_isTempHum(const String& id) {
 // ============================================================================
 // NORMALIZZAZIONE
 // ============================================================================
-static String ha_normalizeSun(const String& raw) {
-  if (raw == "above_horizon") return "Above";
-  if (raw == "below_horizon") return "Below";
-  if (raw == "rising")        return "Rising";
-  if (raw == "setting")       return "Setting";
-  return raw;
-}
-
 static String ha_normalizeState(const String& raw) {
   String s = raw;
 
@@ -135,17 +127,17 @@ static String ha_normalizeState(const String& raw) {
 
 
 // ============================================================================
-// FILTRO ENTITÀ
+// FILTRO ENTITÀ (SUN escluso sempre)
 // ============================================================================
 static bool ha_allowEntity(const String& id) {
 
-  // ESCLUDE qualsiasi entità legata al sole
+  // ESCLUDI TUTTO ciò che riguarda il sole
   {
-    String s = id; 
+    String s = id;
     s.toLowerCase();
-    if (s.startsWith("sun.")      ||   // sun.*
-        s.indexOf("sun") >= 0     ||   // qualunque cosa contenga "sun"
-        s.indexOf("next_") >= 0)       // esclusi anche next_*
+    if (s.startsWith("sun.") ||
+        s.indexOf("sun") >= 0 ||
+        s.indexOf("next_") >= 0)
       return false;
   }
 
@@ -163,7 +155,6 @@ static bool ha_allowEntity(const String& id) {
 
   return false;
 }
-
 
 
 // ============================================================================
@@ -219,8 +210,7 @@ static bool fetchHAStates() {
 
   if (code != 200 || body.length() < 10) return false;
 
-  int  pos       = 0;
-  bool sunExists = false;
+  int pos = 0;
 
   while (true) {
 
@@ -248,19 +238,7 @@ static bool fetchHAStates() {
     String rawState = sanitizeText(body.substring(s0 + 1, s1));
     if (rawState == "unknown" || rawState == "unavailable") continue;
 
-    bool isSun     = (id == "sun.sun");
     bool isTempHum = ha_isTempHum(id);
-
-    if (isSun) {
-      if (rawState != "above_horizon" &&
-          rawState != "below_horizon" &&
-          rawState != "rising" &&
-          rawState != "setting")
-        continue;
-
-      if (sunExists) continue;
-      sunExists = true;
-    }
 
     String fname = id;
     bool isBattery = ha_isBatteryId(id);
@@ -296,18 +274,15 @@ static bool fetchHAStates() {
 
     ha_trimFriendlyName(fname);
 
-    String st = isSun ? ha_normalizeSun(rawState)
-                      : ha_normalizeState(rawState);
-
+    String st = ha_normalizeState(rawState);
     bool isOnOff = (rawState == "on" || rawState == "off");
 
-    // === Inserisci entry ===
     HAEntry e;
     e.id        = id;
     e.name      = fname;
     e.state     = st;
     e.isBattery = isBattery;
-    e.isSun     = isSun;
+    e.isSun     = false;
     e.isOnOff   = isOnOff;
     e.isTempHum = isTempHum;
 
@@ -315,7 +290,7 @@ static bool fetchHAStates() {
   }
 
   ha_ready = true;
-  ha_dirty = true;   // forza ridisegno
+  ha_dirty = true;
   return true;
 }
 
@@ -335,6 +310,14 @@ static void ha_autoRefreshIfNeeded() {
 
 
 // ============================================================================
+// TICK — chiamato dal loop SOLO quando la pagina è visibile
+// ============================================================================
+void tickHA() {
+  ha_autoRefreshIfNeeded();
+}
+
+
+// ============================================================================
 // DRAW BADGE
 // ============================================================================
 static void ha_drawBadge(int x, int y, uint16_t col) {
@@ -347,20 +330,18 @@ static void ha_drawBadge(int x, int y, uint16_t col) {
 // ============================================================================
 void pageHA() {
 
-  ha_autoRefreshIfNeeded();
-
-  if (!ha_dirty) return;   // evita ridisegni inutili
-  ha_dirty = false;
-
-  drawHeader("HOME ASSISTANT");
-  gfx->setTextSize(TEXT_SCALE);
-  gfx->setTextColor(COL_TEXT, COL_BG);
-
   if (!ha_ready) {
     gfx->setCursor(PAGE_X, PAGE_Y + 20);
     gfx->print("Ricerca...");
     return;
   }
+
+  if (!ha_dirty) return;
+  ha_dirty = false;
+
+  drawHeader("HOME ASSISTANT");
+  gfx->setTextSize(TEXT_SCALE);
+  gfx->setTextColor(COL_TEXT, COL_BG);
 
   if (ha_entries.empty()) {
     gfx->setCursor(PAGE_X, PAGE_Y + 20);

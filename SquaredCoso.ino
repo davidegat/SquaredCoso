@@ -604,6 +604,13 @@ void loop() {
   // ---------------------------------------------------------------------------
   // ANIMAZIONI DELLA PAGINA CORRENTE
   // ---------------------------------------------------------------------------
+  if (g_page == P_HA) {
+    tickHA();  // aggiorna gli stati ogni 1s
+    pageHA();  // ridisegna solo se ha_dirty=true
+    delay(5);
+    return;  // evita che sotto qualcosa sovrascriva la pagina
+  }
+
   if (g_page == P_WEATHER)
     pageWeatherParticlesTick();
 
