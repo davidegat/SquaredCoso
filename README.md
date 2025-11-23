@@ -1,5 +1,8 @@
 # README (Italiano / English)
 
+<img width="480" height="480" alt="cosino" src="https://github.com/user-attachments/assets/55e1b0b2-dcb7-42ad-9f52-587eae95f27d" />
+
+
 ## Italiano
 
 SquaredCoso è un firmware per ESP32-S3 con pannello RGB ST7701 480x480 (Panel-4848S040) pensato come bacheca informativa modulare. Ruota automaticamente pagine meteo, qualità dell'aria, orologio, calendario ICS, Bitcoin, cambi valutari, countdown multipli, ore di luce, feed RSS e Quote of the Day, includendo anche una pagina di info di sistema.
