@@ -1,7 +1,6 @@
 # README (Italiano / English)
 
-<img width="480" height="480" alt="cosino" src="https://github.com/user-attachments/assets/55e1b0b2-dcb7-42ad-9f52-587eae95f27d" />
-
+<img width="480" height="480" alt="cosino" src="https://github.com/user-attachments/assets/382ad3ab-e1f3-4cf2-bc89-c8cf43fca65d" />
 
 ## Italiano
 
