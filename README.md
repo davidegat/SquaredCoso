@@ -73,10 +73,23 @@ Imposta la scheda ESP32-S3 con PSRAM attiva e utilizza la Board Manager entry **
 4. Al primo avvio il dispositivo espone una Wi-Fi AP con captive portal: collega un dispositivo e apri la Web UI per impostare rete, città, lingua (it/en), intervallo di rotazione, feed RSS, countdown, chiavi API (OpenAI, ecc.) e le pagine da mostrare.
 5. Salva le impostazioni: vengono scritte su NVS e riutilizzate ai riavvii. Se lat/lon sono vuoti, il firmware effettua il geocoding automatico.
 
+#### Parametri configurabili dalla Web UI
+- Rete Wi-Fi (SSID/password) e lingua dell'interfaccia (it/en).
+- Città, coordinate (con geocoding automatico se lasciate vuote) e intervallo di rotazione delle pagine.
+- Feed ICS per il calendario, feed RSS per la pagina News e countdown multipli con etichetta/data.
+- Selezione delle pagine da mostrare, inclusa **SquaredStellar** (sistema solare) e Home Assistant.
+- Dati finanziari: valuta di riferimento, portafoglio BTC e stazione di partenza/arrivo per il riepilogo nella homepage web.
+- Integrazioni opzionali: chiave e tema OpenAI per la Quote of the Day, IP/token per le entità Home Assistant.
+
 ### Funzioni di base
 - **Ciclo di vita del display**: `displayhelpers.h` gestisce splash iniziale, fade-in/fade-out e backlight PWM su `GFX_BL`, mantenendo i buffer minimi per non saturare la PSRAM.
 - **Web server modulare**: `SquaredWeb.ino` offre captive portal in modalità AP (`/`, `/save`, `/reboot`) e Web UI completa in STA per scegliere pagine, fonti RSS, chiave OpenAI, countdown, valuta di riferimento e parametri Home Assistant.
 - **Persistenza e sincronizzazione**: le preferenze restano in NVS via `settingshandler.h`; il core (`SquaredCoso.ino`) sincronizza NTP, gestisce Wi-Fi AP/STA e lancia fetch periodici delle API (meteo, aria, FX, Bitcoin, ICS, OpenAI) con retry leggeri.
+
+### Pagina SquaredStellar (Sistema Solare)
+- Visualizza il sistema solare in scala con stelle lampeggianti e orbita terrestre centrata sul Sole.
+- Calcola in locale la longitudine solare corrente per mostrare due Terre opposte e l'asse inclinato per gli emisferi boreale e australe.
+- Evidenzia le quattro stagioni (estate, autunno, inverno, primavera) lungo l'orbita e adatta automaticamente le etichette in italiano o inglese.
 
 ### Integrazione di nuove immagini
 1. Genera un header RGB565 dell'immagine (480×480 o dimensioni più piccole) e salvalo in `images/`.
@@ -97,6 +110,7 @@ Imposta la scheda ESP32-S3 con PSRAM attiva e utilizza la Board Manager entry **
 - **Quote of the Day** (`SquaredSay`): frase del giorno da OpenAI (se configurata) con fallback ZenQuotes.
 - **Home Assistant** (`SquaredHA`): badge live di entità selezionate via IP/token, con refresh ogni secondo.
 - **Info di sistema** (`SquaredInfo`): dati chip, heap/PSRAM, Wi-Fi e stato servizi per debugging rapido.
+- **Sistema Solare** (`SquaredStellar`): vista orbitale con Sole, doppia Terra per emisferi e indicatori di stagione, calcolata localmente.
 
 ### Struttura del codice
 - `SquaredCoso.ino`: core del firmware (inizializzazioni, ciclo principale, Wi-Fi, NTP, rotazione pagine, fetch dati).
@@ -180,10 +194,23 @@ Enable PSRAM on the ESP32-S3 board and use the **ESP32 by Espressif Systems** pa
 4. On first boot the device exposes a Wi-Fi AP with captive portal: connect and open the Web UI to set network credentials, city, language (it/en), rotation interval, RSS feed, countdowns, API keys (OpenAI, etc.), and which pages to show.
 5. Save settings: they are stored in NVS and reused on reboot. If lat/lon are empty, the firmware performs automatic geocoding.
 
+#### Configurable parameters via Web UI
+- Wi-Fi credentials and UI language (it/en).
+- City, coordinates (with automatic geocoding when blank), and page rotation interval.
+- ICS calendar feed, RSS feed for News, and multiple countdowns with label/date.
+- Page selection, including **SquaredStellar** (solar system) and Home Assistant.
+- Financial data: base currency, BTC portfolio value, and from/to stations shown in the web homepage summary.
+- Optional integrations: OpenAI key/topic for Quote of the Day, Home Assistant IP/token for entity badges.
+
 ### Core functions
 - **Display lifecycle**: `displayhelpers.h` drives the splash screen, fade-in/fade-out transitions, and PWM backlight on `GFX_BL`, keeping line buffers tiny to preserve PSRAM.
 - **Modular web server**: `SquaredWeb.ino` offers a captive portal in AP mode (`/`, `/save`, `/reboot`) and a full STA Web UI to pick pages, RSS sources, OpenAI key, countdowns, base currency, and Home Assistant settings.
 - **Persistence and sync**: preferences are persisted via `settingshandler.h`; the core (`SquaredCoso.ino`) handles NTP sync, AP/STA Wi-Fi, and periodic fetches of APIs (weather, air quality, FX, Bitcoin, ICS, OpenAI) with lightweight retries.
+
+### SquaredStellar page (Solar System)
+- Displays the solar system with twinkling stars and a centered Sun/Earth orbit.
+- Computes solar longitude locally to render two opposite Earth positions with axial tilt for northern and southern hemispheres.
+- Marks the four seasons (summer, autumn, winter, spring) along the orbit and adapts labels automatically to Italian or English.
 
 ### Adding new images
 1. Produce an RGB565 header for the asset (480×480 or smaller) and place it under `images/`.
@@ -204,6 +231,7 @@ Enable PSRAM on the ESP32-S3 board and use the **ESP32 by Espressif Systems** pa
 - **Quote of the Day** (`SquaredSay`): daily quote via OpenAI (if configured) with ZenQuotes fallback.
 - **Home Assistant** (`SquaredHA`): live badges for filtered entities using the provided IP/token, refreshing every second.
 - **System info** (`SquaredInfo`): chip, heap/PSRAM, Wi-Fi, and service status for quick diagnostics.
+- **Solar system** (`SquaredStellar`): orbital view with Sun, dual Earth hemispheres, and season markers computed locally.
 
 ### Code layout
 - `SquaredCoso.ino`: firmware core (initialization, main loop, Wi-Fi, NTP, page rotation, data fetching).
