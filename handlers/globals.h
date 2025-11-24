@@ -38,9 +38,11 @@ enum Page {
   P_T24,
   P_SUN,
   P_NEWS,
-  P_HA,    // <-- NUOVA PAGINA Home Assistant
-  PAGES
+  P_HA,
+  P_STELLAR,
+  PAGES      // 14
 };
+
 
 /* ============================================================================
    COUNTDOWN
@@ -140,6 +142,7 @@ enum RefreshStep {
   R_SUN,
   R_NEWS,
   R_HA,     // <-- NUOVO STEP Home Assistant
+  R_STELLAR,
   R_DONE
 };
 

@@ -19,7 +19,7 @@
 static const char* PAGE_KEYS[PAGES] = {
   "p_WEATHER", "p_AIR", "p_CLOCK", "p_CAL", "p_BTC",
   "p_QOD", "p_INFO", "p_COUNT", "p_FX", "p_T24",
-  "p_SUN", "p_NEWS", "p_HA"
+  "p_SUN", "p_NEWS", "p_HA", "p_STELLAR"
 };
 
 extern WebServer   web;

@@ -165,7 +165,7 @@ static String discoverHA() {
 static bool fetchHAStates() {
 
   ha_entries.clear();
-  ha_entries.reserve(17);
+  ha_entries.reserve(20);
   ha_ready = false;
 
   if (!g_ha_token.length()) return false;
@@ -189,7 +189,7 @@ static bool fetchHAStates() {
 
   while (true) {
 
-    if (ha_entries.size() >= 17) break;
+    if (ha_entries.size() >= 20) break;
 
     int p = body.indexOf("\"entity_id\"", pos);
     if (p < 0) break;

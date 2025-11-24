@@ -68,6 +68,7 @@ int indexOfCI(const String& src, const String& key, int from = 0);
 #include "pages/SquaredCrypto.h"
 #include "pages/SquaredNews.h"
 #include "pages/SquaredHA.h"
+#include "pages/SquaredStellar.h"
 
 // -----------------------------------------------------------------------------
 // CONFIG APPLICAZIONE / STATO GLOBALE (persistenza via NVS)
@@ -96,7 +97,7 @@ bool g_cycleCompleted = false;
 bool g_show[PAGES] = {
   true, true, true, true, true,
   true, true, true, true, true,
-  true, true
+  true, true, true
 };
 
 double g_btc_owned = NAN;
@@ -348,6 +349,7 @@ void drawCurrentPage() {
     case P_SUN: pageSun(); break;
     case P_NEWS: pageNews(); break;
     case P_HA: pageHA(); break;
+    case P_STELLAR: pageStellar(); break;
   }
 }
 
@@ -622,6 +624,14 @@ void loop() {
 
   if (g_page == P_COUNT)
     tickCountdownSnake();
+
+  if (g_page == P_STELLAR) {
+    // Solo cometa e piccoli effetti: niente redraw completo
+    tickStellar();
+    delay(5);
+    return;  // blocca altre animazioni che potrebbero sovrascrivere
+  }
+
 
   if (g_page == P_T24) {
     int old = temp24_progress;
