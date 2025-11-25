@@ -54,7 +54,7 @@ int indexOfCI(const String& src, const String& key, int from = 0);
 #include "images/cosino1.h"
 #include "images/cosino2.h"
 
-// pagine (ogni header incluso una sola volta)
+// pagine
 #include "pages/SquaredCount.h"
 #include "pages/SquaredCal.h"
 #include "pages/SquaredMeteo.h"
@@ -72,7 +72,7 @@ int indexOfCI(const String& src, const String& key, int from = 0);
 #include "pages/SquaredBinary.h"
 
 // -----------------------------------------------------------------------------
-// CONFIG APPLICAZIONE / STATO GLOBALE (persistenza via NVS)
+// CONFIG APPLICAZIONE
 // -----------------------------------------------------------------------------
 String g_rss_url = "https://feeds.bbci.co.uk/news/rss.xml";
 String g_city = "Bellinzona";
@@ -99,7 +99,6 @@ bool g_show[PAGES] = {
 };
 bool g_pageDirty[PAGES] = { false };
 static int lastSecond = -1;
-
 
 double g_btc_owned = NAN;
 String g_fiat = "CHF";
@@ -179,23 +178,19 @@ const uint16_t COL_ACCENT2 = 0x07FF;
 const uint16_t COL_GOOD = 0x07E0;
 const uint16_t COL_WARN = 0xFFE0;
 const uint16_t COL_BAD = 0xF800;
-
 uint16_t g_air_bg = COL_BG;
 
 // -----------------------------------------------------------------------------
 // LAYOUT TESTO / AREA PAGINE
 // -----------------------------------------------------------------------------
 static const int HEADER_H = 50;
-
 const int PAGE_X = 16;
 const int PAGE_Y = HEADER_H + 12;
 const int PAGE_W = 480 - 32;
 const int PAGE_H = 480 - PAGE_Y - 16;
-
 const int BASE_CHAR_W = 6;
 const int BASE_CHAR_H = 8;
 const int TEXT_SCALE = 2;
-
 const int CHAR_H = BASE_CHAR_H * TEXT_SCALE;
 
 // -----------------------------------------------------------------------------
@@ -318,6 +313,10 @@ static bool tryConnectSTA(uint32_t timeoutMs = 8000) {
 
 bool httpGET(const String& url, String& body, uint32_t timeoutMs = 10000);
 
+
+// -----------------------------------------------------------------------------
+// REFRESH DATI PERIODICO
+// -----------------------------------------------------------------------------
 static int countEnabledPages() {
   int c = 0;
   for (int i = 0; i < PAGES; i++)
@@ -325,10 +324,6 @@ static int countEnabledPages() {
   return c;
 }
 
-
-// -----------------------------------------------------------------------------
-// REFRESH DATI PERIODICO
-// -----------------------------------------------------------------------------
 static uint32_t lastRefresh = 0;
 static const uint32_t REFRESH_MS = 10UL * 60UL * 1000UL;
 static uint32_t lastPageSwitch = 0;
@@ -349,7 +344,10 @@ void drawCurrentPage() {
     case P_WEATHER: pageWeather(); break;
     case P_AIR: pageAir(); break;
     case P_CLOCK: pageClock(); break;
-    case P_BINARY: pageBinaryClock(); break;
+    case P_BINARY:
+      resetBinaryClockFirstDraw();
+      pageBinaryClock();
+      break;
     case P_CAL: pageCalendar(); break;
     case P_BTC: pageCryptoWrapper(); break;
     case P_QOD: pageQOD(); break;
@@ -365,6 +363,7 @@ void drawCurrentPage() {
 }
 
 static bool g_bootPhase = true;
+static bool force_page_full_redraw = false;
 
 // -----------------------------------------------------------------------------
 // REFRESH DI TUTTI I DATI (meteo, aria, BTC, FX, QOD, T24, SUN, NEWS, ICS)
@@ -376,7 +375,6 @@ void refreshAll() {
     fetchWeather();                 // sempre
     g_pageDirty[P_WEATHER] = true;  // sempre
   }
-
 
   // ARIA
   if (g_show[P_AIR] && fetchAir())
@@ -432,8 +430,6 @@ void refreshAll() {
   }
 }
 
-
-
 // -----------------------------------------------------------------------------
 // SELEZIONE RLE "COSINO" RANDOM PER SPLASH DI CICLO
 // -----------------------------------------------------------------------------
@@ -448,12 +444,10 @@ static CosinoRLE pickRandomCosino() {
   return { cosino, sizeof(cosino) / sizeof(RLERun) };
 }
 
-// -----------------------------------------------------------------------------
-// SETUP PRINCIPALE
-// -----------------------------------------------------------------------------
 void setup() {
   panelKickstart();
 
+  // splash iniziale (fade-in)
   showSplashFadeInOnly(SquaredCoso, SquaredCoso_count, 2000);
 
   loadAppConfig();
@@ -468,12 +462,23 @@ void setup() {
 
   refreshAll();
 
-  splashFadeOut();
+  // ---- se esiste UNA sola pagina attiva → niente splashFadeOut ----
+  if (countEnabledPages() == 1) {
+    g_bootPhase = false;
 
+    g_page = firstEnabledPage();
+    gfx->fillScreen(COL_BG);
+    drawCurrentPage();
+
+    lastPageSwitch = millis();
+    return;  // << STOP QUI, nessun fade-out deve eseguire
+  }
+
+  // ---- 2+ pagine → comportamento normale ----
+  splashFadeOut();
   g_bootPhase = false;
 
   drawCurrentPage();
-
   fadeInUI();
 }
 
@@ -616,8 +621,6 @@ void loop() {
     refreshDelay = millis() + 200;
   }
 
-
-
   // ---------------------------------------------------------------------------
   // ROTAZIONE PAGINE AUTOMATICA
   // ---------------------------------------------------------------------------
@@ -630,19 +633,26 @@ void loop() {
     // ------------------------------------------------------------
     if (enabled <= 1) {
 
-      // --- aggiornamento speciale per orologio digitale e binario ---
-      if (g_page == P_CLOCK || g_page == P_BINARY) {
-        time_t now = time(nullptr);
-        struct tm ti;
-        localtime_r(&now, &ti);
+      // --- tick orologi ---
+      time_t now = time(nullptr);
+      struct tm ti;
+      localtime_r(&now, &ti);
 
-        if (ti.tm_sec != lastSecond) {
-          lastSecond = ti.tm_sec;
-          g_pageDirty[g_page] = true;  // forza redraw ogni secondo
+      if (ti.tm_sec != lastSecond) {
+        lastSecond = ti.tm_sec;
+
+        // CLOCK digitale → redraw completo (serve)
+        if (g_page == P_CLOCK) {
+          g_pageDirty[g_page] = true;
+        }
+
+        // CLOCK binario → aggiornamento locale (nessun fillScreen)
+        if (g_page == P_BINARY) {
+          pageBinaryClock();  // aggiornamento istantaneo, NO flicker
         }
       }
 
-      // --- redraw solo se davvero necessario ---
+      // --- redraw solo quando serve (solo per CLOCK digitale) ---
       if (g_pageDirty[g_page]) {
         g_pageDirty[g_page] = false;
         gfx->fillScreen(COL_BG);
@@ -650,15 +660,12 @@ void loop() {
       }
 
       lastPageSwitch = millis();
-      return;
+      return;  // nessuna transizione
     }
-
-
 
     // ------------------------------------------------------------
     // ROTAZIONE CLASSICA (fade, splash, transizioni)
     // ------------------------------------------------------------
-
     quickFadeOut();
 
     int oldPage = g_page;
@@ -695,7 +702,6 @@ void loop() {
     lastPageSwitch = millis();
   }
 
-
   // ---------------------------------------------------------------------------
   // ANIMAZIONI DELLA PAGINA CORRENTE
   // ---------------------------------------------------------------------------
@@ -706,8 +712,21 @@ void loop() {
     return;  // evita che sotto qualcosa sovrascriva la pagina
   }
 
-  if (g_page == P_WEATHER)
+  if (g_page == P_WEATHER) {
+
+    // tick particelle
     pageWeatherParticlesTick();
+
+    // se la pagina è dirty → ridisegna tutto
+    if (g_pageDirty[P_WEATHER]) {
+      g_pageDirty[P_WEATHER] = false;
+      gfx->fillScreen(COL_BG);
+      pageWeather();  // <-- REDRAW CORRETTO
+    }
+
+    delay(5);
+    return;
+  }
 
   if (g_page == P_AIR)
     tickLeaves(g_air_bg);
@@ -724,7 +743,6 @@ void loop() {
     delay(5);
     return;  // blocca altre animazioni che potrebbero sovrascrivere
   }
-
 
   if (g_page == P_T24) {
     int old = temp24_progress;

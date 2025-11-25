@@ -1,19 +1,16 @@
 #pragma once
 /*
-   SquaredCoso – Pagina METEO con particelle full-screen e icone RLE
-   - Fetch da wttr.in (JSON j1), bilingue via g_lang ("it"/"en")
-   - Testi previsioni e condizioni: direttamente dall'API, poi sanitizeText()
-   - Particelle che rimbalzano su bordi e UI, senza sporcare overlay
-   - Icona meteo RLE (sole/nuvole/pioggia) in basso a destra
+   SquaredCoso – Pagina METEO (Open-Meteo version)
+   - Geocoding da Open-Meteo (lat/lon)
+   - Fetch condizioni attuali + daily forecast (3 giorni)
+   - sanitizeText() come sempre
+   - Particelle full-screen + icone RLE (sole/nuvole/pioggia)
 */
 
 #include <Arduino.h>
 #include <Arduino_GFX_Library.h>
-#include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include "../handlers/globals.h"
-
-extern bool jsonFindStringKV(const String& body, const String& key, int from, String& outVal);
 
 extern Arduino_RGB_Display* gfx;
 
@@ -28,7 +25,6 @@ extern void   drawBoldMain(int16_t x, int16_t y, const String& raw, uint8_t scal
 extern void   drawHLine(int y);
 extern bool   httpGET(const String& url, String& body, uint32_t timeoutMs);
 extern String sanitizeText(const String& in);
-extern int    indexOfCI(const String& src, const String& key, int from);
 
 extern String g_city;
 extern String g_lang;
@@ -39,95 +35,259 @@ extern void drawRLE(int x, int y, int w, int h, const RLERun *data, size_t runs)
 #include "../images/nuvole.h"
 #include "../images/pioggia.h"
 
-// ---------------------------------------------------------------------------
-// Stato meteo corrente + descrizioni previste (testo già bilingue da API)
-// ---------------------------------------------------------------------------
+// ====================================================
+// METEO STATE
+// ====================================================
 static float  w_now_tempC = NAN;
 static String w_now_desc;
 static String w_desc[3];
 
-// ---------------------------------------------------------------------------
-// Fetch meteo da wttr.in (j1) usando g_city e g_lang
-// NESSUN controllo di "cambiamento": se parsifica qualcosa → aggiorna e ritorna true
-// ---------------------------------------------------------------------------
-bool fetchWeather() {
+// ----------------------------------------------------
+// estrazione semplice numerica "key": 12.3
+// (con parametro "from" per limitare il blocco)
+// ----------------------------------------------------
+static bool extractJsonNumber(const String& body,
+                              const String& key,
+                              float &out,
+                              int from = 0)
+{
+  int p = body.indexOf(key, from);
+  if (p < 0) return false;
+
+  p = body.indexOf(":", p);
+  if (p < 0) return false;
+
+  int s = p + 1;
+  while (s < (int)body.length() && (body[s]==' ' || body[s]=='\"'))
+    s++;
+
+  int e = s;
+  while (e < (int)body.length() &&
+        (isdigit(body[e]) || body[e]=='-' || body[e]=='+' || body[e]=='.'))
+    e++;
+
+  if (e <= s) return false;
+
+  out = body.substring(s, e).toFloat();
+  return true;
+}
+
+// ----------------------------------------------------
+// estrazione stringa "key": "value"
+// (non usata per ora, ma la teniamo)
+// ----------------------------------------------------
+static bool extractJsonString2(const String& body, const String& key, String &out)
+{
+  int p = body.indexOf(key);
+  if (p < 0) return false;
+
+  p = body.indexOf(":", p);
+  if (p < 0) return false;
+
+  int s = body.indexOf("\"", p);
+  if (s < 0) return false;
+  s++;
+
+  int e = body.indexOf("\"", s);
+  if (e < 0) return false;
+
+  out = body.substring(s, e);
+  out.trim();
+  return out.length() > 0;
+}
+
+// ----------------------------------------------------
+// Geocoding → lat/lon (Open-Meteo geocoding API)
+// ----------------------------------------------------
+static bool fetchLatLon(float &lat, float &lon)
+{
+  String city = g_city;
+  city.trim();
+  city.replace(" ", "%20");
 
   String url =
-    "https://wttr.in/" + g_city + "?format=j1&lang=" + g_lang;
+    "https://geocoding-api.open-meteo.com/v1/search?name=" + city +
+    "&count=1&language=en&format=json";
 
   String body;
-  if (!httpGET(url, body, 10000)) {
-    return false;   // se httpGET fallisce → niente meteo
+  if (!httpGET(url, body, 8000))
+    return false;
+
+  if (!extractJsonNumber(body, "\"latitude\"", lat))
+    return false;
+
+  if (!extractJsonNumber(body, "\"longitude\"", lon))
+    return false;
+
+  return true;
+}
+
+// ----------------------------------------------------
+// Mapping weathercode → descrizione (IT/EN)
+// ----------------------------------------------------
+static String mapWeatherCodeToDesc(int code, const String& lang)
+{
+  String d = "Cloudy";
+
+  // mappa basata sulla documentazione Open-Meteo
+  if (code == 0) {
+    d = "Clear sky";
+  } else if (code == 1 || code == 2 || code == 3) {
+    d = "Partly cloudy";
+  } else if (code == 45 || code == 48) {
+    d = "Fog";
+  } else if ((code >= 51 && code <= 57) || (code >= 61 && code <= 67)) {
+    d = "Rain";
+  } else if ((code >= 71 && code <= 77)) {
+    d = "Snow";
+  } else if (code >= 80 && code <= 82) {
+    d = "Rain shower";
+  } else if (code >= 85 && code <= 86) {
+    d = "Snow shower";
+  } else if (code >= 95 && code <= 99) {
+    d = "Thunderstorm";
   }
+
+  if (lang == "it") {
+    if (d == "Clear sky")        d = "Sereno";
+    else if (d == "Partly cloudy") d = "Nuvoloso";
+    else if (d == "Cloudy")        d = "Coperto";
+    else if (d == "Fog")           d = "Nebbia";
+    else if (d == "Rain")          d = "Pioggia";
+    else if (d == "Snow")          d = "Neve";
+    else if (d == "Rain shower")   d = "Rovesci";
+    else if (d == "Snow shower")   d = "Nevischio";
+    else if (d == "Thunderstorm")  d = "Temporali";
+  }
+
+  return d;
+}
+
+// ----------------------------------------------------
+// Estrai l'ennesimo weathercode dall'array daily.weathercode
+// ----------------------------------------------------
+static bool extractDailyWeathercode(const String& body, int index, int &codeOut)
+{
+  int dailyPos = body.indexOf("\"daily\"");
+  if (dailyPos < 0) return false;
+
+  int wcPos = body.indexOf("\"weathercode\"", dailyPos);
+  if (wcPos < 0) return false;
+
+  int bracket = body.indexOf('[', wcPos);
+  if (bracket < 0) return false;
+
+  int len = body.length();
+  int p = bracket + 1;
+  int currentIndex = 0;
+
+  while (p < len) {
+    // salta spazi, virgole, newline
+    while (p < len &&
+           (body[p]==' ' || body[p]==',' || body[p]=='\n' ||
+            body[p]=='\r' || body[p]=='\t'))
+      p++;
+
+    if (p >= len || body[p] == ']')
+      break;
+
+    int start = p;
+    while (p < len &&
+           (body[p]=='-' || body[p]=='+' || isdigit(body[p])))
+      p++;
+
+    if (currentIndex == index) {
+      codeOut = body.substring(start, p).toInt();
+      return true;
+    }
+
+    currentIndex++;
+  }
+
+  return false;
+}
+
+// ----------------------------------------------------
+// Fetch meteo da Open-Meteo
+// ----------------------------------------------------
+bool fetchWeather()
+{
+  // reset stato, per evitare residui vecchi se il fetch fallisce
+  w_now_tempC = NAN;
+  w_now_desc  = "";
+  for (int i = 0; i < 3; i++) {
+    w_desc[i] = "";
+  }
+
+  float lat = NAN, lon = NAN;
+  if (!fetchLatLon(lat, lon))
+    return false;
+
+  String url =
+    "https://api.open-meteo.com/v1/forecast"
+    "?latitude="  + String(lat, 6) +
+    "&longitude=" + String(lon, 6) +
+    "&current_weather=true"
+    "&daily=weathercode"
+    "&timezone=auto";
+
+  String body;
+  if (!httpGET(url, body, 10000))
+    return false;
 
   bool ok = false;
 
-  // -------------------- CURRENT CONDITION --------------------
-  int cc = indexOfCI(body, "\"current_condition\"", 0);
-  if (cc >= 0) {
+  // ------------------------------------------------
+  // current_weather block
+  // ------------------------------------------------
+  int cwPos = body.indexOf("\"current_weather\"");
+  if (cwPos >= 0) {
 
-    String t;
-
-    if (jsonFindStringKV(body, "temp_C", cc, t)) {
-      w_now_tempC = t.toFloat();
+    // Temperatura attuale (°C)
+    float t;
+    if (extractJsonNumber(body, "\"temperature\"", t, cwPos)) {
+      w_now_tempC = t;
       ok = true;
     }
 
-    int posLang = indexOfCI(
-      body,
-      (g_lang == "it" ? "\"lang_it\"" : "\"lang_en\""),
-      cc
-    );
-    if (posLang < 0)
-      posLang = indexOfCI(body, "\"weatherDesc\"", cc);
-
-    if (posLang >= 0 && jsonFindStringKV(body, "value", posLang, t)) {
-      w_now_desc = sanitizeText(t);
-      ok = true;
+    // weathercode → descrizione
+    float codef;
+    if (extractJsonNumber(body, "\"weathercode\"", codef, cwPos)) {
+      int code = (int)codef;
+      String d = mapWeatherCodeToDesc(code, g_lang);
+      w_now_desc = sanitizeText(d);
+      if (w_now_desc.length()) ok = true;
     }
   }
 
-  // -------------------- FORECAST --------------------
-  int searchPos = indexOfCI(body, "\"weather\"", 0);
-  if (searchPos < 0) searchPos = (cc >= 0 ? cc : 0);
-
+  // ------------------------------------------------
+  // Forecast 3 giorni da daily.weathercode[]
+  // ------------------------------------------------
   for (int i = 0; i < 3; i++) {
-
-    String v;
-    int posLang = indexOfCI(
-      body,
-      (g_lang == "it" ? "\"lang_it\"" : "\"lang_en\""),
-      searchPos
-    );
-    if (posLang < 0)
-      posLang = indexOfCI(body, "\"weatherDesc\"", searchPos);
-
-    if (posLang < 0)
+    int code;
+    if (!extractDailyWeathercode(body, i, code))
       break;
 
-    if (jsonFindStringKV(body, "value", posLang, v)) {
-      w_desc[i] = sanitizeText(v);
-      ok = true;
-    }
-
-    searchPos = posLang + 8;
+    String d = mapWeatherCodeToDesc(code, g_lang);
+    w_desc[i] = sanitizeText(d);
+    if (w_desc[i].length()) ok = true;
   }
 
   return ok;
 }
 
 
-
-// ---------------------------------------------------------------------------
-// Scelta icona in base alla descrizione (supporta IT/EN)
-// ---------------------------------------------------------------------------
+// ======================================================
+// ICONA DA DESCRIZIONE
+// ======================================================
 static inline int pickWeatherIcon(const String& d) {
   String s = d;
   s.toLowerCase();
-  if (s.indexOf("sun")   >= 0 || s.indexOf("sole")  >= 0) return 0;
+  if (s.indexOf("clear") >= 0 || s.indexOf("seren") >= 0) return 0;
   if (s.indexOf("rain")  >= 0 || s.indexOf("piogg") >= 0) return 2;
   return 1;
 }
+
 
 // ---------------------------------------------------------------------------
 // Particelle di polvere che rimbalzano su UI, bordi e linee orizzontali
@@ -292,10 +452,15 @@ void pageWeather() {
 
   int y = PAGE_Y;
 
-  String line =
-    (!isnan(w_now_tempC) && w_now_desc.length())
-      ? String((int)round(w_now_tempC)) + "c  " + w_now_desc
-      : (g_lang == "it" ? "Sto aggiornando..." : "Updating...");
+  // linea principale: preferisci sempre mostrare qualcosa
+  String line;
+  if (!isnan(w_now_tempC) && w_now_desc.length()) {
+    line = String((int)round(w_now_tempC)) + "c  " + w_now_desc;
+  } else if (w_now_desc.length()) {
+    line = w_now_desc;
+  } else {
+    line = (g_lang == "it" ? "Sto aggiornando..." : "Updating...");
+  }
 
   drawBoldMain(PAGE_X, y + 20, line, 2);
   y += 60;
@@ -341,6 +506,7 @@ void pageWeather() {
       break;
   }
 
+  // temperatura grande in basso a sinistra
   if (!isnan(w_now_tempC)) {
     gfx->setTextColor(COL_ACCENT1, COL_BG);
     gfx->setTextSize(9);

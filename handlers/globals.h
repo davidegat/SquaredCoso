@@ -152,5 +152,7 @@ enum RefreshStep {
   R_DONE
 };
 
+
+
 #endif // GLOBALS_H
 

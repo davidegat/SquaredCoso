@@ -165,7 +165,7 @@ static String discoverHA() {
 static bool fetchHAStates() {
 
   ha_entries.clear();
-  ha_entries.reserve(20);
+  ha_entries.reserve(15);
   ha_ready = false;
 
   if (!g_ha_token.length()) return false;
@@ -294,7 +294,7 @@ void pageHA() {
   gfx->setTextSize(TEXT_SCALE);
   gfx->setTextColor(COL_TEXT, COL_BG);
 
-  int y = PAGE_Y;
+  int y = PAGE_Y - 40;
 
   if (ha_entries.empty()) {
     gfx->setCursor(PAGE_X, y);
@@ -318,8 +318,9 @@ void pageHA() {
       gfx->print(e.state);
     }
 
-    y += BASE_CHAR_H * TEXT_SCALE + 8;
+    y += BASE_CHAR_H * TEXT_SCALE + 10;
     drawHLine(y - 4);
+    y += BASE_CHAR_H * TEXT_SCALE + -13;
   }
 }
 
