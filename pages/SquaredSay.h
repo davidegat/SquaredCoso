@@ -113,9 +113,9 @@ static bool fetchQOD_OpenAI() {
   String prompt =
     (g_lang == "it")
       ? ("Scrivi una breve frase in stile " + g_oa_topic +
-         " in buon italiano e senza errori. Solo la frase.")
+         " in buon italiano e senza errori. Solo la frase, sempre nuova.")
       : ("Write a short quote in the style of " + g_oa_topic +
-         " in good English without errors. Only the quote.");
+         " in good English without errors. Only the quote, always new.");
 
   String body =
     "{\"model\":\"gpt-4.1-nano\","

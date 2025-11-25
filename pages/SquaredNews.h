@@ -32,17 +32,19 @@ static String news_title[NEWS_MAX];
 // Rimozione tag HTML/XML da un frammento (mantiene solo testo)
 // ---------------------------------------------------------------------------
 static inline String stripTags(const String& s) {
+  const uint16_t L = s.length();
   String out;
-  const uint16_t len = s.length();
-  out.reserve(len);
+  out.reserve(L);
 
-  bool tag = false;
+  bool inTag = false;
 
-  for (uint16_t i = 0; i < len; i++) {
+  for (uint16_t i = 0; i < L; i++) {
     char c = s[i];
-    if (c == '<') { tag = true;  continue; }
-    if (c == '>') { tag = false; continue; }
-    if (!tag) out += c;
+
+    if (c == '<') { inTag = true;  continue; }
+    if (c == '>') { inTag = false; continue; }
+
+    if (!inTag) out.concat(c);  // concat = molto più veloce di +=
   }
   return out;
 }
@@ -103,21 +105,28 @@ static inline bool getTag(const String& src, const char* tag, String& out) {
 // ---------------------------------------------------------------------------
 bool fetchNews() {
 
+  // Reset buffer finale (5 titoli da mostrare)
   for (uint8_t i = 0; i < NEWS_MAX; i++)
     news_title[i] = "";
 
-  String url = g_rss_url.length()
-                 ? g_rss_url
-                 : "https://feeds.bbci.co.uk/news/rss.xml";
+  // Buffer temporaneo (10 titoli non ancora randomizzati)
+  String raw_title[10];
+  uint8_t found = 0;
 
+  // URL effettivo
+  const String url = g_rss_url.length()
+                       ? g_rss_url
+                       : "https://feeds.bbci.co.uk/news/rss.xml";
+
+  // Scarichiamo il feed (ma lavoriamo solo sulle prime parti)
   String body;
-  if (!httpGET(url, body, 10000)) return false;
+  if (!httpGET(url, body, 8000)) return false;
   if (!body.length()) return false;
 
-  uint16_t pos   = 0;
-  uint8_t  count = 0;
+  // Parsing leggero: cerchiamo solo <item> ... </item> e dentro <title>
+  uint16_t pos = 0;
 
-  while (count < NEWS_MAX) {
+  while (found < 10) {
 
     int a = body.indexOf("<item", pos);
     if (a < 0) break;
@@ -128,20 +137,43 @@ bool fetchNews() {
     int b = body.indexOf("</item>", openEnd);
     if (b < 0) break;
 
+    // Contenuto interno del blocco <item>
     String blk = body.substring(openEnd + 1, b);
     pos = b + 7;
 
+    // Cerchiamo solo <title>...</title>
     String title;
     if (!getTag(blk, "title", title)) continue;
 
     title = cleanTitle(title);
     if (!title.length()) continue;
 
-    news_title[count++] = title;
+    raw_title[found++] = title;
   }
 
-  return count > 0;
+  if (found == 0) return false;
+
+  // ---------------------------------------------------
+  // RANDOM PICK: 5 titoli scelti dai 10 disponibili
+  // (o meno, se il feed ne aveva meno)
+  // ---------------------------------------------------
+  uint8_t pickCount = min((uint8_t)NEWS_MAX, found);
+
+  // Fisher–Yates shuffle sui primi `found` titoli
+  for (uint8_t i = found - 1; i > 0; i--) {
+    uint8_t j = random(0, i + 1);
+    String tmp = raw_title[i];
+    raw_title[i] = raw_title[j];
+    raw_title[j] = tmp;
+  }
+
+  // Copiamo i primi 5 risultato randomizzato
+  for (uint8_t i = 0; i < pickCount; i++)
+    news_title[i] = raw_title[i];
+
+  return true;
 }
+
 
 // ---------------------------------------------------------------------------
 // pageNews: header + elenco titoli con word-wrap e separatori

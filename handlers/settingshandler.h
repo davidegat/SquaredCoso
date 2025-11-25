@@ -1,55 +1,58 @@
+#pragma once
+
 #include <Arduino.h>
 #include <WebServer.h>
 #include <Preferences.h>
 #include "globals.h"
 
 // ============================================================================
-//  MODULO: SETTINGS
-//
-//  Gestisce:
-//    • ricezione dei valori POST dalla WebUI
-//    • validazione e sanitizzazione dati
-//    • salvataggio in NVS (Preferences)
-//    • caricamento dei valori all'avvio
-//    • generazione pagina HTML tramite htmlSettings()
-//
+//  SETTINGS HANDLER – VERSIONE CORRETTA
 // ============================================================================
 
-// Chiavi POST associate alle checkbox delle pagine
 static const char* PAGE_KEYS[PAGES] = {
-  "p_WEATHER", "p_AIR", "p_CLOCK", "p_CAL", "p_BTC",
-  "p_QOD", "p_INFO", "p_COUNT", "p_FX", "p_T24",
-  "p_SUN", "p_NEWS", "p_HA", "p_STELLAR"
+  "p_WEATHER",
+  "p_AIR",
+  "p_CLOCK",
+  "p_BINARY",
+  "p_CAL",
+  "p_BTC",
+  "p_QOD",
+  "p_INFO",
+  "p_COUNT",
+  "p_FX",
+  "p_T24",
+  "p_SUN",
+  "p_NEWS",
+  "p_HA",
+  "p_STELLAR"
 };
 
 extern WebServer   web;
 extern Preferences prefs;
+extern bool g_forceRedraw;
+
+extern bool g_splash_enabled;
 
 
 // ============================================================================
-// handleSettings() – Gestione richiesta POST/GET della pagina impostazioni
+// handleSettings()
 // ============================================================================
 void handleSettings() {
 
   bool saved = false;
 
-  // Se POST, aggiorno impostazioni
   if (web.method() == HTTP_POST) {
 
-    // --------------------- Parametri base ---------------------
-    String city = web.arg("city");
-    String lang = web.arg("lang");
-    String ics  = web.arg("ics");
-
-    city.trim();
-    lang.trim();
-    ics.trim();
+    // --------------------- BASE ---------------------
+    String city = web.arg("city"); city.trim();
+    String lang = web.arg("lang"); lang.trim();
+    String ics  = web.arg("ics");  ics.trim();
 
     if (city.length()) g_city = city;
     g_lang = (lang == "it" || lang == "en") ? lang : "it";
     g_ics  = ics;
 
-    // --------------------- Intervallo cambio pagina ---------------------
+    // --------------------- INTERVALLO PAGINE ---------------------
     if (web.hasArg("page_s")) {
       long ps = web.arg("page_s").toInt();
       if (ps < 5)   ps = 5;
@@ -57,31 +60,21 @@ void handleSettings() {
       PAGE_INTERVAL_MS = ps * 1000UL;
     }
 
-    // --------------------- Valuta ---------------------
     if (web.hasArg("fiat")) {
       g_fiat = web.arg("fiat");
       g_fiat.trim();
       g_fiat.toUpperCase();
     }
 
-    // --------------------- Home Assistant: IP ---------------------
+    // --------------------- HOME ASSISTANT ---------------------
     if (web.hasArg("ha_ip")) {
       g_ha_ip = sanitizeText(web.arg("ha_ip"));
       g_ha_ip.trim();
-
-      // Rimuove “http://” o “https://”
-      if (g_ha_ip.startsWith("http://"))
-        g_ha_ip.remove(0, 7);
-
-      if (g_ha_ip.startsWith("https://"))
-        g_ha_ip.remove(0, 8);
-
-      // Rimuove eventuale "/" finale
-      if (g_ha_ip.endsWith("/"))
-        g_ha_ip.remove(g_ha_ip.length() - 1);
+      if (g_ha_ip.startsWith("http://"))  g_ha_ip.remove(0, 7);
+      if (g_ha_ip.startsWith("https://")) g_ha_ip.remove(0, 8);
+      if (g_ha_ip.endsWith("/"))         g_ha_ip.remove(g_ha_ip.length() - 1);
     }
 
-    // --------------------- Home Assistant: TOKEN ---------------------
     if (web.hasArg("ha_token")) {
       g_ha_token = sanitizeText(web.arg("ha_token"));
       g_ha_token.trim();
@@ -94,62 +87,64 @@ void handleSettings() {
       g_btc_owned = s.length() ? s.toDouble() : NAN;
     }
 
-    // --------------------- OpenAI ---------------------
+    // --------------------- OPENAI ---------------------
     g_oa_key   = sanitizeText(web.arg("openai_key"));
     g_oa_topic = sanitizeText(web.arg("openai_topic"));
 
-    // --------------------- RSS URL ---------------------
+    // --------------------- SPLASH ---------------------
+    g_splash_enabled = web.hasArg("splash_enabled");
+
+    // --------------------- RSS ---------------------
     if (web.hasArg("rss_url")) {
       g_rss_url = sanitizeText(web.arg("rss_url"));
       g_rss_url.trim();
     }
 
-    // --------------------- Countdown (8 elementi) ---------------------
+    // --------------------- COUNTDOWN ---------------------
     for (int i = 0; i < 8; i++) {
       char kn[6], kt[6];
-      snprintf(kn, sizeof(kn), "cd%dn", i + 1);
-      snprintf(kt, sizeof(kt), "cd%dt", i + 1);
+      snprintf(kn, sizeof(kn), "cd%dn", i+1);
+      snprintf(kt, sizeof(kt), "cd%dt", i+1);
       cd[i].name    = sanitizeText(web.arg(kn));
       cd[i].whenISO = sanitizeText(web.arg(kt));
     }
 
-    // --------------------- Pagine visibili ---------------------
+    // --------------------- PAGINE VISIBILI ---------------------
     for (int i = 0; i < PAGES; i++)
       g_show[i] = web.hasArg(PAGE_KEYS[i]);
 
-    // Almeno CLOCK deve restare attivo
     bool any = false;
-    for (int i = 0; i < PAGES; i++) {
-      if (g_show[i]) {
-        any = true;
-        break;
-      }
-    }
-    if (!any)
-      g_show[P_CLOCK] = true;
+    for (int i = 0; i < PAGES; i++)
+      if (g_show[i]) { any = true; break; }
 
-    // --------------------- SALVATAGGIO NVS ---------------------
+    if (!any) g_show[P_CLOCK] = true;
+
+    // --------------------- SALVA IN NVS ---------------------
     prefs.begin("app", false);
 
-    prefs.putString("city",    g_city);
-    prefs.putString("lang",    g_lang);
-    prefs.putString("ics",     g_ics);
-    prefs.putString("lat",     g_lat);
-    prefs.putString("lon",     g_lon);
-    prefs.putString("rss_url", g_rss_url);
-    prefs.putString("ha_ip",   g_ha_ip);
+    prefs.putString("city", g_city);
+    prefs.putString("lang", g_lang);
+    prefs.putString("ics",  g_ics);
+    prefs.putString("lat",  g_lat);
+    prefs.putString("lon",  g_lon);
+
+    prefs.putBool("splash", g_splash_enabled);
+
+
+    prefs.putString("ha_ip",    g_ha_ip);
     prefs.putString("ha_token", g_ha_token);
 
     prefs.putULong("page_ms", PAGE_INTERVAL_MS);
 
-    prefs.putString("oa_key",   g_oa_key);
-    prefs.putString("oa_topic", g_oa_topic);
-    prefs.putString("fiat",     g_fiat);
+    prefs.putString("fiat",      g_fiat);
+    prefs.putString("rss_url",   g_rss_url);
+    prefs.putString("oa_key",    g_oa_key);
+    prefs.putString("oa_topic",  g_oa_topic);
 
     for (int i = 0; i < 8; i++) {
       char kn[6], kt[6];
-      snprintf(kn, sizeof(kn), "cd%dn", i + 1);
-      snprintf(kt, sizeof(kt), "cd%dt", i + 1);
+      snprintf(kn, sizeof(kn), "cd%dn", i+1);
+      snprintf(kt, sizeof(kt), "cd%dt", i+1);
       prefs.putString(kn, cd[i].name);
       prefs.putString(kt, cd[i].whenISO);
     }
@@ -159,17 +154,14 @@ void handleSettings() {
 
     ensureCurrentPageEnabled();
     g_dataRefreshPending = true;
-
     saved = true;
   }
 
-  // Risposta pagina impostazioni
   web.send(200, "text/html; charset=utf-8", htmlSettings(saved, ""));
 }
 
-
 // ============================================================================
-// loadAppConfig() – Caricamento iniziale da NVS
+// loadAppConfig()
 // ============================================================================
 void loadAppConfig() {
 
@@ -185,21 +177,18 @@ void loadAppConfig() {
   g_lat  = prefs.getString("lat",  g_lat);
   g_lon  = prefs.getString("lon",  g_lon);
 
+  g_splash_enabled   = prefs.getBool("splash", true);
+
+
   g_ha_ip    = prefs.getString("ha_ip", "");
   g_ha_token = prefs.getString("ha_token", "");
 
   g_ha_ip.trim();
   g_ha_token.trim();
 
-  // Normalizza l’IP rimuovendo protocolli o slash finali
-  if (g_ha_ip.startsWith("http://"))
-    g_ha_ip.remove(0, 7);
-
-  if (g_ha_ip.startsWith("https://"))
-    g_ha_ip.remove(0, 8);
-
-  if (g_ha_ip.endsWith("/"))
-    g_ha_ip.remove(g_ha_ip.length() - 1);
+  if (g_ha_ip.startsWith("http://"))  g_ha_ip.remove(0, 7);
+  if (g_ha_ip.startsWith("https://")) g_ha_ip.remove(0, 8);
+  if (g_ha_ip.endsWith("/"))         g_ha_ip.remove(g_ha_ip.length() - 1);
 
   PAGE_INTERVAL_MS = prefs.getULong("page_ms", PAGE_INTERVAL_MS);
 
@@ -211,8 +200,8 @@ void loadAppConfig() {
 
   for (int i = 0; i < 8; i++) {
     char kn[6], kt[6];
-    snprintf(kn, sizeof(kn), "cd%dn", i + 1);
-    snprintf(kt, sizeof(kt), "cd%dt", i + 1);
+    snprintf(kn, sizeof(kn), "cd%dn", i+1);
+    snprintf(kt, sizeof(kt), "cd%dt", i+1);
     cd[i].name    = prefs.getString(kn, "");
     cd[i].whenISO = prefs.getString(kt, "");
   }
@@ -220,21 +209,18 @@ void loadAppConfig() {
   uint16_t mask = prefs.getUShort("pages_mask", 0xFFFF);
   prefs.end();
 
-  // Validazione intervallo
+  pagesArrayFromMask(mask);
+
   uint32_t s = PAGE_INTERVAL_MS / 1000;
   if (s < 5)   PAGE_INTERVAL_MS = 5000;
   if (s > 600) PAGE_INTERVAL_MS = 600000;
-
-  // Applica maschera pagine
-  pagesArrayFromMask(mask);
 
   g_oa_key.trim();
   g_oa_topic.trim();
 }
 
-
 // ============================================================================
-// saveAppConfig() – Salvataggio manuale su NVS
+// saveAppConfig()
 // ============================================================================
 void saveAppConfig() {
 
@@ -246,8 +232,9 @@ void saveAppConfig() {
   prefs.putString("ics",  g_ics);
   prefs.putString("lat",  g_lat);
   prefs.putString("lon",  g_lon);
+
   prefs.putString("rss_url", g_rss_url);
-  prefs.putString("ha_ip",   g_ha_ip);
+  prefs.putString("ha_ip",    g_ha_ip);
   prefs.putString("ha_token", g_ha_token);
 
   prefs.putULong("page_ms", PAGE_INTERVAL_MS);

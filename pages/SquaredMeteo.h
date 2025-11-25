@@ -20,8 +20,8 @@ extern Arduino_RGB_Display* gfx;
 extern const uint16_t COL_BG;
 extern const uint16_t COL_ACCENT1;
 extern const uint16_t COL_ACCENT2;
-extern const int PAGE_X;
-extern const int PAGE_Y;
+extern const int      PAGE_X;
+extern const int      PAGE_Y;
 
 extern void   drawHeader(const String& title);
 extern void   drawBoldMain(int16_t x, int16_t y, const String& raw, uint8_t scale);
@@ -39,61 +39,84 @@ extern void drawRLE(int x, int y, int w, int h, const RLERun *data, size_t runs)
 #include "../images/nuvole.h"
 #include "../images/pioggia.h"
 
-// stato meteo corrente + descrizioni previste (testo già bilingue da API)
+// ---------------------------------------------------------------------------
+// Stato meteo corrente + descrizioni previste (testo già bilingue da API)
+// ---------------------------------------------------------------------------
 static float  w_now_tempC = NAN;
 static String w_now_desc;
 static String w_desc[3];
 
 // ---------------------------------------------------------------------------
 // Fetch meteo da wttr.in (j1) usando g_city e g_lang
+// NESSUN controllo di "cambiamento": se parsifica qualcosa → aggiorna e ritorna true
 // ---------------------------------------------------------------------------
 bool fetchWeather() {
-  String url = "https://wttr.in/" + g_city + "?format=j1&lang=" + g_lang;
 
-  WiFiClientSecure client;
-  client.setInsecure();
+  String url =
+    "https://wttr.in/" + g_city + "?format=j1&lang=" + g_lang;
 
-  HTTPClient https;
-  https.begin(client, url);
-  https.addHeader("User-Agent", "curl");
-  https.addHeader("Accept", "application/json");
-
-  if (https.GET() != 200) {
-    https.end();
-    return false;
+  String body;
+  if (!httpGET(url, body, 10000)) {
+    return false;   // se httpGET fallisce → niente meteo
   }
 
-  String body = https.getString();
-  https.end();
+  bool ok = false;
 
+  // -------------------- CURRENT CONDITION --------------------
   int cc = indexOfCI(body, "\"current_condition\"", 0);
-
   if (cc >= 0) {
+
     String t;
 
-    if (jsonFindStringKV(body, "temp_C", cc, t))
+    if (jsonFindStringKV(body, "temp_C", cc, t)) {
       w_now_tempC = t.toFloat();
+      ok = true;
+    }
 
-    if (jsonFindStringKV(
-          body,
-          "value",
-          indexOfCI(body, "\"weatherDesc\"", cc),
-          w_now_desc))
-    {
-      w_now_desc = sanitizeText(w_now_desc);
+    int posLang = indexOfCI(
+      body,
+      (g_lang == "it" ? "\"lang_it\"" : "\"lang_en\""),
+      cc
+    );
+    if (posLang < 0)
+      posLang = indexOfCI(body, "\"weatherDesc\"", cc);
+
+    if (posLang >= 0 && jsonFindStringKV(body, "value", posLang, t)) {
+      w_now_desc = sanitizeText(t);
+      ok = true;
     }
   }
+
+  // -------------------- FORECAST --------------------
+  int searchPos = indexOfCI(body, "\"weather\"", 0);
+  if (searchPos < 0) searchPos = (cc >= 0 ? cc : 0);
 
   for (int i = 0; i < 3; i++) {
-    int pos = indexOfCI(body, "\"weatherDesc\"", cc + i * 60);
+
     String v;
-    if (pos >= 0 && jsonFindStringKV(body, "value", pos, v)) {
+    int posLang = indexOfCI(
+      body,
+      (g_lang == "it" ? "\"lang_it\"" : "\"lang_en\""),
+      searchPos
+    );
+    if (posLang < 0)
+      posLang = indexOfCI(body, "\"weatherDesc\"", searchPos);
+
+    if (posLang < 0)
+      break;
+
+    if (jsonFindStringKV(body, "value", posLang, v)) {
       w_desc[i] = sanitizeText(v);
+      ok = true;
     }
+
+    searchPos = posLang + 8;
   }
 
-  return true;
+  return ok;
 }
+
+
 
 // ---------------------------------------------------------------------------
 // Scelta icona in base alla descrizione (supporta IT/EN)

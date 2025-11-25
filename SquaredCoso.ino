@@ -69,6 +69,7 @@ int indexOfCI(const String& src, const String& key, int from = 0);
 #include "pages/SquaredNews.h"
 #include "pages/SquaredHA.h"
 #include "pages/SquaredStellar.h"
+#include "pages/SquaredBinary.h"
 
 // -----------------------------------------------------------------------------
 // CONFIG APPLICAZIONE / STATO GLOBALE (persistenza via NVS)
@@ -83,9 +84,6 @@ uint32_t PAGE_INTERVAL_MS = 15000;
 String g_ha_ip = "";
 String g_ha_token = "";
 
-String g_from_station = "Bellinzona";
-String g_to_station = "Lugano";
-
 CDEvent cd[8];
 
 String g_oa_key = "";
@@ -99,11 +97,15 @@ bool g_show[PAGES] = {
   true, true, true, true, true,
   true, true, true
 };
+bool g_pageDirty[PAGES] = { false };
+static int lastSecond = -1;
+
 
 double g_btc_owned = NAN;
 String g_fiat = "CHF";
 
 volatile bool g_dataRefreshPending = false;
+bool g_splash_enabled = true;
 
 // -----------------------------------------------------------------------------
 // GEOCODING OPEN-METEO (auto-lat/lon se mancano in config)
@@ -316,6 +318,14 @@ static bool tryConnectSTA(uint32_t timeoutMs = 8000) {
 
 bool httpGET(const String& url, String& body, uint32_t timeoutMs = 10000);
 
+static int countEnabledPages() {
+  int c = 0;
+  for (int i = 0; i < PAGES; i++)
+    if (g_show[i]) c++;
+  return c;
+}
+
+
 // -----------------------------------------------------------------------------
 // REFRESH DATI PERIODICO
 // -----------------------------------------------------------------------------
@@ -339,6 +349,7 @@ void drawCurrentPage() {
     case P_WEATHER: pageWeather(); break;
     case P_AIR: pageAir(); break;
     case P_CLOCK: pageClock(); break;
+    case P_BINARY: pageBinaryClock(); break;
     case P_CAL: pageCalendar(); break;
     case P_BTC: pageCryptoWrapper(); break;
     case P_QOD: pageQOD(); break;
@@ -359,36 +370,69 @@ static bool g_bootPhase = true;
 // REFRESH DI TUTTI I DATI (meteo, aria, BTC, FX, QOD, T24, SUN, NEWS, ICS)
 // -----------------------------------------------------------------------------
 void refreshAll() {
-  if (g_show[P_WEATHER]) fetchWeather();
-  if (g_show[P_AIR]) fetchAir();
 
-  {
-    bool ok = fetchICS();
-    bool anyEvent = false;
-
-    for (int i = 0; i < 3; i++) {
-      if (cal[i].used) {
-        anyEvent = true;
-        break;
-      }
-    }
-
-    g_show[P_CAL] = ok && anyEvent;
+  // METEO
+  if (g_show[P_WEATHER]) {
+    fetchWeather();                 // sempre
+    g_pageDirty[P_WEATHER] = true;  // sempre
   }
 
-  if (g_show[P_BTC]) fetchCryptoWrapper();
-  if (g_show[P_QOD]) fetchQOD();
-  if (g_show[P_FX]) fetchFX();
-  if (g_show[P_T24]) fetchTemp24();
-  if (g_show[P_SUN]) fetchSun();
-  if (g_show[P_NEWS]) fetchNews();
-  if (g_show[P_HA]) fetchHA();
 
-  if (g_bootPhase) return;
+  // ARIA
+  if (g_show[P_AIR] && fetchAir())
+    g_pageDirty[P_AIR] = true;
 
-  drawCurrentPage();
-  lastPageSwitch = millis();
+  // CALENDARIO (ICS cambia sempre → sempre dirty)
+  fetchICS();
+  g_pageDirty[P_CAL] = true;
+
+  // BTC
+  if (g_show[P_BTC] && fetchCryptoWrapper())
+    g_pageDirty[P_BTC] = true;
+
+  // QOD
+  if (g_show[P_QOD] && fetchQOD())
+    g_pageDirty[P_QOD] = true;
+
+  // FX
+  if (g_show[P_FX] && fetchFX())
+    g_pageDirty[P_FX] = true;
+
+  // T24 (grafico)
+  if (g_show[P_T24] && fetchTemp24())
+    g_pageDirty[P_T24] = true;
+
+  // SUN (alba/tramonto)
+  if (g_show[P_SUN] && fetchSun())
+    g_pageDirty[P_SUN] = true;
+
+  // NEWS
+  if (g_show[P_NEWS] && fetchNews())
+    g_pageDirty[P_NEWS] = true;
+
+  // HOME ASSISTANT
+  if (g_show[P_HA] && fetchHA())
+    g_pageDirty[P_HA] = true;
+
+  // Durante il boot evita di ridisegnare inutilmente
+  // se siamo nel boot, dopo refresh dobbiamo SEMPRE ridisegnare la pagina corrente
+  if (g_bootPhase) {
+    gfx->fillScreen(COL_BG);
+    drawCurrentPage();
+    lastPageSwitch = millis();
+    return;
+  }
+
+  // fuori dal boot, ridisegniamo solo se la pagina corrente è diventata dirty
+  if (g_pageDirty[g_page]) {
+    g_pageDirty[g_page] = false;
+    gfx->fillScreen(COL_BG);
+    drawCurrentPage();
+    lastPageSwitch = millis();
+  }
 }
+
+
 
 // -----------------------------------------------------------------------------
 // SELEZIONE RLE "COSINO" RANDOM PER SPLASH DI CICLO
@@ -491,66 +535,76 @@ void loop() {
   // ---------------------------------------------------------------------------
   // SCHEDULER: ESECUZIONE STEP ATTUALE (uno per volta)
   // ---------------------------------------------------------------------------
+  // ---------------------------------------------------------------------------
+  // SCHEDULER: ESECUZIONE STEP ATTUALE (uno per volta)
+  // ---------------------------------------------------------------------------
   if (refreshStep != R_DONE && millis() > refreshDelay) {
 
     switch (refreshStep) {
 
       case R_WEATHER:
-        if (g_show[P_WEATHER]) fetchWeather();
+        if (g_show[P_WEATHER]) {
+          fetchWeather();                 // sempre
+          g_pageDirty[P_WEATHER] = true;  // sempre
+        }
         refreshStep = R_AIR;
         break;
 
+
+
       case R_AIR:
-        if (g_show[P_AIR]) fetchAir();
+        if (g_show[P_AIR] && fetchAir())
+          g_pageDirty[P_AIR] = true;
         refreshStep = R_ICS;
         break;
 
       case R_ICS:
-        {
-          bool ok = fetchICS();
-          bool anyEvent = false;
-
-          for (int i = 0; i < 3; i++)
-            if (cal[i].used) anyEvent = true;
-
-          g_show[P_CAL] = ok && anyEvent;
-          refreshStep = R_BTC;
-          break;
-        }
+        // ICS sempre considerato "dirty" per il calendario
+        fetchICS();
+        g_pageDirty[P_CAL] = true;
+        refreshStep = R_BTC;
+        break;
 
       case R_BTC:
-        if (g_show[P_BTC]) fetchCryptoWrapper();
+        if (g_show[P_BTC] && fetchCryptoWrapper())
+          g_pageDirty[P_BTC] = true;
         refreshStep = R_QOD;
         break;
 
       case R_QOD:
-        if (g_show[P_QOD]) fetchQOD();
+        if (g_show[P_QOD] && fetchQOD())
+          g_pageDirty[P_QOD] = true;
         refreshStep = R_FX;
         break;
 
       case R_FX:
-        if (g_show[P_FX]) fetchFX();
+        if (g_show[P_FX] && fetchFX())
+          g_pageDirty[P_FX] = true;
         refreshStep = R_T24;
         break;
 
       case R_T24:
-        if (g_show[P_T24]) fetchTemp24();
+        if (g_show[P_T24] && fetchTemp24())
+          g_pageDirty[P_T24] = true;
         refreshStep = R_SUN;
         break;
 
       case R_SUN:
-        if (g_show[P_SUN]) fetchSun();
+        if (g_show[P_SUN] && fetchSun())
+          g_pageDirty[P_SUN] = true;
         refreshStep = R_NEWS;
         break;
 
       case R_NEWS:
-        if (g_show[P_NEWS]) fetchNews();
-        refreshStep = R_HA;  // <-- CORRETTO
+        if (g_show[P_NEWS] && fetchNews())
+          g_pageDirty[P_NEWS] = true;
+        refreshStep = R_HA;
         break;
 
       case R_HA:
-        if (g_show[P_HA]) fetchHA();
-        refreshStep = R_DONE;  // dopo HA → fine ciclo
+        if (g_show[P_HA] && fetchHA())
+          g_pageDirty[P_HA] = true;
+        refreshStep = R_DONE;
         break;
 
       case R_DONE:
@@ -563,10 +617,47 @@ void loop() {
   }
 
 
+
   // ---------------------------------------------------------------------------
   // ROTAZIONE PAGINE AUTOMATICA
   // ---------------------------------------------------------------------------
   if (millis() - lastPageSwitch >= PAGE_INTERVAL_MS) {
+
+    int enabled = countEnabledPages();
+
+    // ------------------------------------------------------------
+    // UNA SOLA PAGINA ATTIVA → nessuna rotazione, nessuna transizione
+    // ------------------------------------------------------------
+    if (enabled <= 1) {
+
+      // --- aggiornamento speciale per orologio digitale e binario ---
+      if (g_page == P_CLOCK || g_page == P_BINARY) {
+        time_t now = time(nullptr);
+        struct tm ti;
+        localtime_r(&now, &ti);
+
+        if (ti.tm_sec != lastSecond) {
+          lastSecond = ti.tm_sec;
+          g_pageDirty[g_page] = true;  // forza redraw ogni secondo
+        }
+      }
+
+      // --- redraw solo se davvero necessario ---
+      if (g_pageDirty[g_page]) {
+        g_pageDirty[g_page] = false;
+        gfx->fillScreen(COL_BG);
+        drawCurrentPage();
+      }
+
+      lastPageSwitch = millis();
+      return;
+    }
+
+
+
+    // ------------------------------------------------------------
+    // ROTAZIONE CLASSICA (fade, splash, transizioni)
+    // ------------------------------------------------------------
 
     quickFadeOut();
 
@@ -581,10 +672,11 @@ void loop() {
 
     if (g_cycleCompleted) {
 
-      CosinoRLE c = pickRandomCosino();
-      showCycleSplash(c.data, c.runs, 1500);
-
-      splashFadeOut();
+      if (g_splash_enabled) {
+        CosinoRLE c = pickRandomCosino();
+        showCycleSplash(c.data, c.runs, 1500);
+        splashFadeOut();
+      }
 
       int first = firstEnabledPage();
       if (first < 0) first = P_CLOCK;
@@ -602,6 +694,7 @@ void loop() {
     quickFadeIn();
     lastPageSwitch = millis();
   }
+
 
   // ---------------------------------------------------------------------------
   // ANIMAZIONI DELLA PAGINA CORRENTE

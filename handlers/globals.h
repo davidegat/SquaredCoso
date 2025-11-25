@@ -27,21 +27,24 @@ String htmlSettings(bool saved, const String& msg);
 ============================================================================ */
 enum Page {
   P_WEATHER = 0,
-  P_AIR,
-  P_CLOCK,
-  P_CAL,
-  P_BTC,
-  P_QOD,
-  P_INFO,
-  P_COUNT,
-  P_FX,
-  P_T24,
-  P_SUN,
-  P_NEWS,
-  P_HA,
-  P_STELLAR,
-  PAGES      // 14
+  P_AIR,        // 1
+  P_CLOCK,      // 2
+  P_BINARY,     // 3
+  P_CAL,        // 4
+  P_BTC,        // 5
+  P_QOD,        // 6
+  P_INFO,       // 7
+  P_COUNT,      // 8
+  P_FX,         // 9
+  P_T24,        // 10
+  P_SUN,        // 11
+  P_NEWS,       // 12
+  P_HA,         // 13
+  P_STELLAR,    // 14
+  PAGES
 };
+
+
 
 
 /* ============================================================================
@@ -87,6 +90,7 @@ extern bool jsonFindStringKV(const String& body,
 extern String g_ha_ip;
 extern String g_ha_token;
 
+
 /* ============================================================================
    VARIABILI GRAFICHE (DEFINITE COME CONST NEL .INO)
 ============================================================================ */
@@ -115,6 +119,7 @@ extern bool g_show[PAGES];
 extern int g_page;
 extern uint16_t g_air_bg;
 extern bool g_timeSynced;
+extern bool g_splash_enabled;
 
 uint16_t pagesMaskFromArray();
 void pagesArrayFromMask(uint16_t m);
@@ -122,6 +127,7 @@ int firstEnabledPage();
 bool advanceToNextEnabled();
 void ensureCurrentPageEnabled();
 void drawCurrentPage();
+void pageBinaryClock();
 
 /* ============================================================================
    REFRESH FLAG

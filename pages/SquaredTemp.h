@@ -209,13 +209,56 @@ static void pageTemp24() {
 
   gfx->fillRect(X - 2, Y - 2, W + 4, H + 60, COL_BG);
   gfx->drawRect(X, Y, W, H, COL_ACCENT2);
+// -----------------------------------------------------------
+// Etichette dei 7 giorni reali (IT/EN), basate sulla data locale
+// -----------------------------------------------------------
+{
+  // Giorni della settimana
+  const char* days_it[7] = {
+    "Lun", "Mar", "Mer", "Gio", "Ven", "Sab", "Dom"
+  };
+  const char* days_en[7] = {
+    "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"
+  };
 
-  String legend =
-    (g_lang == "it"
-       ? String((int)mn) + " min - " + String((int)mx) + " max"
-       : String((int)mn) + " low - " + String((int)mx) + " high");
+  // Scegli lingua
+  const char** D = (g_lang == "it" ? days_it : days_en);
 
-  drawBoldMain(PAGE_X, Y + H + 20, legend, TEXT_SCALE + 1);
+  // Calcola indice del giorno corrente
+  time_t now = time(nullptr);
+  struct tm info;
+  localtime_r(&now, &info);
+
+  // tm_wday: 0=Dom, 1=Lun,... 6=Sab
+  // mappo 0=Dom → indice 6, 1=Lun → 0, ecc.
+  int base = (info.tm_wday == 0 ? 6 : info.tm_wday - 1);
+
+  // Anchor orizzontali
+  const int anchors[7] = { 0, 4, 8, 12, 16, 20, 23 };
+
+  gfx->setTextColor(COL_ACCENT2, COL_BG);
+  gfx->setTextSize(1);
+
+  for (int i = 0; i < 7; i++) {
+    int dayIndex = (base + i) % 7;
+
+    // coordinate X per singolo giorno
+    int xx = X + (anchors[i] * W) / 23;
+
+    gfx->setCursor(xx - 10, Y + H + 48);
+    gfx->print(D[dayIndex]);
+  }
+
+  // Ripristino lo scale standard della pagina
+  gfx->setTextSize(TEXT_SCALE);
+}
+
+//  String legend =
+//    (g_lang == "it"
+//       ? String((int)mn) + " min - " + String((int)mx) + " max"
+//       : String((int)mn) + " low - " + String((int)mx) + " high");
+
+//  drawBoldMain(PAGE_X, Y + H + 20, legend, TEXT_SCALE + 1);
 
   float range = mx - mn;
   if (range < 0.1f) range = 0.1f;
