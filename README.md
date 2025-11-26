@@ -99,7 +99,7 @@ Il firmware gestisce in autonomia:
 
 ### Meteo
 
-Dati da wttr.in, descrizioni locali, previsioni e icone RLE con particelle animate.
+Dati da openmeteo, descrizioni locali, previsioni e icone RLE con particelle animate.
 
 ### Qualità dell’aria
 
