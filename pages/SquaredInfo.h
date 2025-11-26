@@ -189,7 +189,11 @@ static void pageInfo() {
   // INFO FIRMWARE
   // -------------------------------------------------------------------------
   gfx->setCursor(PAGE_X, y + CHAR_H);
-  gfx->print("Firmware: SquaredCoso by gat");
+  gfx->print("Firmware: ");
+  gfx->print(FW_NAME);
+  gfx->print(" ");
+  gfx->print(FW_VERSION);
+
 
   y += CHAR_H * 2 + 10;
 
