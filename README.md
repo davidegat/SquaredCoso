@@ -174,15 +174,17 @@ Uptime, rete, memoria, CPU, pagine attive.
 
 Creative Commons Attribution–NonCommercial 4.0 International.
 
+Attribuzione richiesta: citare l’autore **Davide "gat" Nasato** e il repository originale: [https://github.com/davidegat/SquaredCoso](https://github.com/davidegat/SquaredCoso)
+
 ---
 
 # 🇬🇧 English
 
 ## Introduction
 
-**SquaredCoso** is an ESP32-S3 firmware for the 480×480 ST7701 RGB panel (Panel-4848S040). It turns the display into a **stand-alone information dashboard**, rotating several configurable pages through a web interface.
+**SquaredCoso** is an ESP32-S3 firmware designed for the 480×480 ST7701 RGB panel (Panel-4848S040). It turns the display into a **stand‑alone information dashboard**, with modular pages rotating automatically and fully configurable through the WebUI.
 
-Displayed pages include:
+The device can display:
 
 * Weather and forecasts
 * Air quality
@@ -191,76 +193,145 @@ Displayed pages include:
 * ICS calendar
 * 24h temperature graph
 * Daylight, twilight, UV, moon phase
-* Bitcoin
+* Bitcoin and daily change
 * FX rates
 * Multiple countdowns
-* RSS News
-* Quote of the Day (OpenAI or ZenQuotes)
-* Home Assistant status
+* RSS news
+* Quote of the day (OpenAI or ZenQuotes)
+* Home Assistant entity status
 * Solar system view
 * System info
 
-Pages can be individually enabled or disabled.
+Each page is independent, optimized for memory and speed, and can be enabled or disabled from the WebUI.
 
 ---
 
 ## Supported hardware
 
-Designed for the **ESP32-S3 Panel-4848S040** with ST7701 RGB, GT911 touch and FSPI microSD.
-Hardware reference: [https://github.com/davidegat/ESP32-4848S040-Fun](https://github.com/davidegat/ESP32-4848S040-Fun)
+Designed for the **ESP32-S3 Panel-4848S040**, featuring:
 
-(Full pinout identical to Italian section.)
+* 480×480 IPS RGB display
+* ST7701 controller (parallel RGB)
+* GT911 touch
+* microSD (FSPI)
+
+Hardware reference:
+[https://github.com/davidegat/ESP32-4848S040-Fun](https://github.com/davidegat/ESP32-4848S040-Fun)
+
+### Pinout
+
+(Identical to Italian section.)
 
 ### Arduino IDE setup
 
 * ESP32 package 2.0.16 / 2.0.17
-* PSRAM enabled
-* Huge APP partition
-* Required libs: Arduino_GFX_Library, TAMC_GT911, WiFi, WebServer, DNSServer, HTTPClient, Preferences
+* PSRAM enabled (OPI)
+* Partition scheme: Huge APP (3MB No OTA)
+* Required libraries: Arduino_GFX_Library ≥1.6.0, TAMC_GT911, WiFi, WebServer, DNSServer, HTTPClient, Preferences
 
 ---
 
 ## Operation
 
-On first boot, the device creates its own Wi-Fi network and exposes a **captive portal**, used only to configure the home Wi-Fi network.
+On first boot, the device creates its own Wi‑Fi network in **AP mode**, exposing a **captive portal** used only to configure the home Wi‑Fi.
 
-Once configured, the device switches to **STA mode** and the full **WebUI** becomes available, allowing control of:
+After configuration, it switches to **STA mode**, becomes reachable through its IP address and exposes the full **WebUI**, where you can configure:
 
 * City and language
 * Coordinates or automatic geocoding
 * Page rotation interval
 * ICS feed
 * RSS feed
-* Countdowns
+* Countdown timers
 * FX/BTC settings
-* OpenAI key/topic
+* OpenAI key and topic
 * Home Assistant IP/token
-* Page selection
+* Enabled pages
 
-Settings are stored in NVS.
+Settings are saved to NVS and persist across reboots.
 
-The firmware automatically handles:
+The firmware autonomously manages:
 
-* NTP time sync
+* NTP synchronization
 * Data fetching
 * Page rotation
-* Wi-Fi reconnection
-* Backlight and transitions
+* Wi‑Fi reconnection
+* Graphic transitions and PWM backlight
 
 ---
 
 ## Page overview
 
-(Translated versions of the Italian descriptions.)
+### Weather
+
+Live conditions, forecasts, localized descriptions and RLE icons, with animated particles.
+
+### Air quality
+
+PM2.5 / PM10 / O₃ / NO₂ with visual severity indication.
+
+### Clock
+
+Large digital time and date.
+
+### Binary clock
+
+Binary view of hours, minutes and seconds.
+
+### ICS calendar
+
+Shows today's events from the configured ICS feed.
+
+### Temperature 24h
+
+Reconstructed hourly graph using Open‑Meteo daily data.
+
+### Daylight
+
+Sunrise, sunset, twilight, solar noon, day length, UV, moon phase.
+
+### Bitcoin
+
+Current price, delta and portfolio value.
+
+### FX rates
+
+Currency table relative to base currency.
+
+### Countdowns
+
+Up to 8 programmable events.
+
+### News
+
+First headlines from RSS feed.
+
+### Quote of the day
+
+OpenAI‑generated or ZenQuotes fallback.
+
+### Home Assistant
+
+Displays selected entities (sensors, lights, plugs, battery, temperature, motion).
+
+### Solar system
+
+Top‑down view of Earth orbit with seasonal position and axial tilt.
+
+### System info
+
+Uptime, network details, memory, CPU, active pages.
 
 ---
 
 ## Code layout
 
-Same as Italian section.
+Same structure as the Italian section.
 
 ---
 
 ## License
 
 Creative Commons Attribution–NonCommercial 4.0 International.
+
+Attribution required: cite **Davide "gat" Nasato** and the original repository: [https://github.com/davidegat/SquaredCoso](https://github.com/davidegat/SquaredCoso)
