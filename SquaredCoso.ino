@@ -29,6 +29,14 @@
      al repository ufficiale SquaredCoso
 */
 
+// ---------------------------------------------------------------------------
+// Firmware name + version
+// ---------------------------------------------------------------------------
+const char* FW_NAME = "SquaredCoso";
+const char* FW_VERSION = "v1.0.0";
+extern const char* FW_NAME;
+extern const char* FW_VERSION;
+
 #include <Arduino.h>
 #include <Wire.h>
 #include <Preferences.h>
@@ -448,7 +456,18 @@ void setup() {
   panelKickstart();
 
   // splash iniziale (fade-in)
-  showSplashFadeInOnly(SquaredCoso, SquaredCoso_count, 2000);
+  // ---------------------------------------------------------------------------
+  // Mostra versione firmware nello spigolo inferiore destro dello splash
+  // ---------------------------------------------------------------------------
+  gfx->setTextSize(1);
+  gfx->setTextColor(COL_TEXT, COL_BG);
+
+  int fwLen = strlen(FW_VERSION) * BASE_CHAR_W;
+  int fwX = gfx->width() - fwLen - 6;         // 6px di margine dal bordo destro
+  int fwY = gfx->height() - BASE_CHAR_H - 6;  // 6px dal bordo inferiore
+
+  gfx->setCursor(fwX, fwY);
+  gfx->print(FW_VERSION);
 
   loadAppConfig();
 
