@@ -21,6 +21,7 @@ struct CosinoRLE {
 ============================================================================ */
 String sanitizeText(const String& in);
 String htmlSettings(bool saved, const String& msg);
+extern String g_note;
 
 /* ============================================================================
    ENUM PAGINE
@@ -41,6 +42,8 @@ enum Page {
   P_NEWS,       // 12
   P_HA,         // 13
   P_STELLAR,    // 14
+  P_NOTES,
+  P_CHRONOS,
   PAGES
 };
 
@@ -91,6 +94,7 @@ extern String g_ha_ip;
 extern String g_ha_token;
 
 
+
 /* ============================================================================
    VARIABILI GRAFICHE (DEFINITE COME CONST NEL .INO)
 ============================================================================ */
@@ -128,6 +132,8 @@ bool advanceToNextEnabled();
 void ensureCurrentPageEnabled();
 void drawCurrentPage();
 void pageBinaryClock();
+void pageChronos();
+
 
 /* ============================================================================
    REFRESH FLAG
@@ -147,11 +153,11 @@ enum RefreshStep {
   R_T24,
   R_SUN,
   R_NEWS,
-  R_HA,     // <-- NUOVO STEP Home Assistant
+  R_HA, 
   R_STELLAR,
+  R_NOTES,
   R_DONE
 };
-
 
 
 #endif // GLOBALS_H

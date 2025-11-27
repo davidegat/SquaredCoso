@@ -25,12 +25,11 @@ extern String g_lang;
 
 
 // ============================================================================
-// CLOCK FULLSCREEN – niente header, solo ora + data + weekday
+// CLOCK FULLSCREEN 
 // ============================================================================
 inline void pageClock() {
   time_t now;
   struct tm t;
-
   time(&now);
   localtime_r(&now, &t);
 
@@ -56,62 +55,73 @@ inline void pageClock() {
   const int colonW = cw;
   const int totalW = cw * 2 + colonW + cw * 2;
 
-  const int clockX = (480 - totalW) >> 1;
-  const int clockY = 40;  // molto più in alto → fullscreen
+  // HEIGHTS DEL LAYOUT
+  const int H_clock = ch;
+  const int H_sep   = 20 + 2;      // 20 px + linea
+  const int H_date  = BASE_CHAR_H * 5;
+  const int H_wday  = BASE_CHAR_H * 4;
+
+  const int blockH = H_clock + H_sep + H_date + 28 + H_wday;
+
+  // CENTRATURA VERTICALE
+  const int blockY = (480 - blockH) >> 1;
+  int y = blockY;
 
   gfx->fillScreen(COL_BG);
 
+  // ---------------------------------------------------------------------------
+  // OROLOGIO (HH:MM)
+  // ---------------------------------------------------------------------------
   gfx->setTextSize(scale);
   gfx->setTextColor(COL_TEXT, COL_BG);
 
-  // ---------------------------------------------------------------------------
-  // ORE (HH)
-  // ---------------------------------------------------------------------------
-  gfx->setCursor(clockX, clockY);
+  const int clockX = (480 - totalW) >> 1;
+
+  // ORE
+  gfx->setCursor(clockX, y);
   gfx->print(bufH);
 
-  // ---------------------------------------------------------------------------
-  // Due punti custom
-  // ---------------------------------------------------------------------------
+  // DUE PUNTI
   {
-    const int colonX  = clockX + cw * 2;
-    const int dotW    = max(colonW / 6, 4);
-    const int dotH    = max(ch / 8, 4);
-    const int cx      = colonX + ((colonW - dotW) >> 1);
+    const int colonX = clockX + cw * 2;
+    const int dotW   = max(colonW / 6, 4);
+    const int dotH   = max(ch / 8, 4);
+    const int cx     = colonX + ((colonW - dotW) >> 1);
 
-    const int upY = clockY + (ch * 27) / 100;
-    const int dnY = clockY + (ch * 62) / 100;
+    const int upY = y + (ch * 27) / 100;
+    const int dnY = y + (ch * 62) / 100;
 
     gfx->fillRect(cx, upY, dotW, dotH, COL_ACCENT1);
     gfx->fillRect(cx, dnY, dotW, dotH, COL_ACCENT1);
   }
 
-  // ---------------------------------------------------------------------------
-  // MINUTI (MM)
-  // ---------------------------------------------------------------------------
-  gfx->setCursor(clockX + cw * 2 + colonW, clockY);
+  // MINUTI
+  gfx->setCursor(clockX + cw * 2 + colonW, y);
   gfx->print(bufM);
 
-  // ---------------------------------------------------------------------------
-  // Separatore orizzontale
-  // ---------------------------------------------------------------------------
-  const int sepY = clockY + ch + 20;
-  drawHLine(sepY);
+  // AGGIORNA Y
+  y += H_clock + 20;
 
   // ---------------------------------------------------------------------------
-  // Data
+  // SEPARATORE
+  // ---------------------------------------------------------------------------
+  drawHLine(y);
+  y += 14;
+
+  // ---------------------------------------------------------------------------
+  // DATA
   // ---------------------------------------------------------------------------
   gfx->setTextSize(5);
   gfx->setTextColor(COL_TEXT, COL_BG);
 
   const int dateW = strlen(bufD) * BASE_CHAR_W * 5;
-  const int dateY = sepY + 30;
-
-  gfx->setCursor((480 - dateW) >> 1, dateY);
+  gfx->setCursor((480 - dateW) >> 1, y);
   gfx->print(bufD);
 
+  y += H_date + 28;
+
   // ---------------------------------------------------------------------------
-  // Giorno della settimana
+  // WEEKDAY
   // ---------------------------------------------------------------------------
   static const char it_wd[7][12] PROGMEM = {
     "Domenica","Lunedi","Martedi","Mercoledi",
@@ -123,20 +133,16 @@ inline void pageClock() {
   };
 
   char wd[12];
-  if (g_lang == "it") {
-    strcpy_P(wd, it_wd[t.tm_wday]);
-  } else {
-    strcpy_P(wd, en_wd[t.tm_wday]);
-  }
+  if (g_lang == "it") strcpy_P(wd, it_wd[t.tm_wday]);
+  else               strcpy_P(wd, en_wd[t.tm_wday]);
 
   gfx->setTextSize(4);
-
   const int wdW = strlen(wd) * BASE_CHAR_W * 4;
-  const int wdY = dateY + (BASE_CHAR_H * 5) + 28;
 
-  gfx->setCursor((480 - wdW) >> 1, wdY);
+  gfx->setCursor((480 - wdW) >> 1, y);
   gfx->print(wd);
 
   gfx->setTextSize(TEXT_SCALE);
 }
+
 

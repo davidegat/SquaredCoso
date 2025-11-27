@@ -23,29 +23,26 @@ extern const int PAGE_Y;
 extern const int TEXT_SCALE;
 extern const int CHAR_H;
 
-extern void   drawHeader(const String& title);
-extern void   drawBoldMain(int16_t x, int16_t y, const String& raw, uint8_t scale);
+extern void drawHeader(const String& title);
+extern void drawBoldMain(int16_t x, int16_t y, const String& raw, uint8_t scale);
 extern String sanitizeText(const String& in);
 
 extern CDEvent cd[8];
-extern String  g_lang;
+extern String g_lang;
 
 String formatShortDate(time_t t);
 
 // ---------------------------------------------------------------------------
 // Parsing ISO "YYYY-MM-DD HH:MM" → time_t locale
 // ---------------------------------------------------------------------------
-static bool parseISOToTimeT(const String& iso, time_t& out)
-{
+static bool parseISOToTimeT(const String& iso, time_t& out) {
   if (iso.length() < 16) return false;
 
   struct tm t = {};
 
   t.tm_year =
-      (iso.charAt(0) - '0') * 1000 +
-      (iso.charAt(1) - '0') * 100  +
-      (iso.charAt(2) - '0') * 10   +
-       iso.charAt(3) - '0'         - 1900;
+    (iso.charAt(0) - '0') * 1000 + (iso.charAt(1) - '0') * 100 +
+    (iso.charAt(2) - '0') * 10   +  iso.charAt(3) - '0' - 1900;
 
   t.tm_mon  = (iso.charAt(5) - '0') * 10 + (iso.charAt(6) - '0') - 1;
   t.tm_mday = (iso.charAt(8) - '0') * 10 + (iso.charAt(9) - '0');
@@ -60,8 +57,7 @@ static bool parseISOToTimeT(const String& iso, time_t& out)
 // ---------------------------------------------------------------------------
 // Format del tempo rimanente in stringa compatta (IT/EN)
 // ---------------------------------------------------------------------------
-static String formatDelta(time_t target)
-{
+static String formatDelta(time_t target) {
   time_t now;
   time(&now);
 
@@ -86,14 +82,12 @@ static String formatDelta(time_t target)
 // ---------------------------------------------------------------------------
 // Pagina COUNTDOWN: raccoglie, ordina e rende visivamente gli eventi
 // ---------------------------------------------------------------------------
-void pageCountdowns()
-{
+void pageCountdowns() {
   drawHeader("Countdown");
-  int y = PAGE_Y;
 
   struct Row {
-    const char* name;
-    time_t      when;
+    String name;
+    time_t when;
   };
 
   Row list[8];
@@ -106,7 +100,7 @@ void pageCountdowns()
     time_t t;
     if (!parseISOToTimeT(cd[i].whenISO, t)) continue;
 
-    list[n].name = cd[i].name.c_str();
+    list[n].name = sanitizeText(cd[i].name);
     list[n].when = t;
     n++;
   }
@@ -114,54 +108,82 @@ void pageCountdowns()
   if (n == 0) {
     drawBoldMain(
       PAGE_X,
-      y + CHAR_H,
+      PAGE_Y + CHAR_H,
       (g_lang == "it" ? "Nessun countdown" : "No countdowns"),
       TEXT_SCALE
     );
     return;
   }
 
-  // insertion sort per data crescente (pochi elementi → costo minimo)
+  // sort per tempo crescente
   for (int i = 1; i < n; i++) {
-    Row key = list[i];
+    Row k = list[i];
     int j = i - 1;
-    while (j >= 0 && list[j].when > key.when) {
+    while (j >= 0 && list[j].when > k.when) {
       list[j + 1] = list[j];
       j--;
     }
-    list[j + 1] = key;
+    list[j + 1] = k;
   }
+
+  // layout griglia 2×4, 3 righe per evento:
+  // 1) nome
+  // 2) data
+  // 3) countdown
+  const int COL_W   = 240;
+  const int CELL_H  = CHAR_H * 4 + 14;  // spazio per 3 righe + margini
+  const int START_Y = PAGE_Y;
 
   gfx->setTextSize(TEXT_SCALE);
 
-  // rendering righe countdown (nome + data corta + delta)
-  for (int i = 0; i < n; i++) {
+  // linea verticale centrale
+  gfx->drawFastVLine(240, START_Y, 480 - START_Y - 10, COL_HEADER);
 
-    String nm = sanitizeText(list[i].name);
+  for (int i = 0; i < n && i < 8; i++) {
+    int col = (i < 4) ? 0 : 1;
+    int row = (i < 4) ? i : i - 4;
+
+    int colBaseX = col * COL_W;
+    int x = colBaseX + PAGE_X;
+    int y = START_Y + row * CELL_H;
+
+    String nm = list[i].name;
     String dt = formatShortDate(list[i].when);
     String dl = formatDelta(list[i].when);
 
+    // 1) Nome (riga 1)
     gfx->setTextColor(COL_ACCENT1, COL_BG);
-    gfx->setCursor(PAGE_X, y + CHAR_H);
+    gfx->setCursor(x, y + CHAR_H);
     gfx->print(nm);
 
-    int y2 = y + CHAR_H * 2 + 4;
+    // 2) Data (riga 2)
+    int y_date = y + CHAR_H * 2 + 2;
     gfx->setTextColor(COL_HEADER, COL_BG);
-    gfx->setCursor(PAGE_X, y2);
+    gfx->setCursor(x, y_date);
     gfx->print("(");
     gfx->print(dt);
     gfx->print(")");
 
+    // 3) Countdown (riga 3, allineato a destra nella cella)
+    int y_delta = y + CHAR_H * 3 + 4;
     gfx->setTextColor(COL_ACCENT2, COL_BG);
-    gfx->setCursor(PAGE_X + 180, y2);
+
+    // stima larghezza del testo countdown (6 px per char in base font)
+    int deltaWidth = dl.length() * 6 * TEXT_SCALE;
+    int x_delta = colBaseX + COL_W - deltaWidth - PAGE_X;
+
+    gfx->setCursor(x_delta, y_delta);
     gfx->print(dl);
 
-    y += CHAR_H * 3 + 10;
-
-    if (i < n - 1)
-      gfx->drawFastHLine(PAGE_X, y, 440, COL_HEADER);
-
-    if (y > 460) break;
+    // separatore orizzontale per righe interne della colonna
+    if (row < 3) {
+      gfx->drawFastHLine(
+        colBaseX + PAGE_X,
+        y + CELL_H - 4,
+        COL_W - 2 * PAGE_X,
+        COL_HEADER
+      );
+    }
   }
 }
 
@@ -175,10 +197,10 @@ static const int disp_w = 480;
 static const int disp_h = 480;
 
 static const int snake_loop =
-    (disp_w * 2) + (disp_h * 2);
+  (disp_w * 2) + (disp_h * 2);
 
 struct SnakeSeg {
-  int     x, y, w, h;
+  int x, y, w, h;
   uint8_t life;
 };
 
@@ -187,16 +209,12 @@ static SnakeSeg  trail[MAX_TRAIL];
 static int       trail_len = 0;
 static int       snake_pos = 0;
 
-// ---------------------------------------------------------------------------
-// Fading di un colore RGB565 in base a life (0–255)
-// ---------------------------------------------------------------------------
 // life: 0-255  (255 = colore pieno, 0 = colore di sfondo)
-static uint16_t fade565(uint16_t fg, uint8_t life)
-{
+static uint16_t fade565(uint16_t fg, uint8_t life) {
   uint16_t bg = COL_BG;
 
   uint8_t fg_r = (fg >> 11) & 0x1F;
-  uint8_t fg_g = (fg >> 5)  & 0x3F;
+  uint8_t fg_g = (fg >> 5) & 0x3F;
   uint8_t fg_b =  fg        & 0x1F;
 
   uint8_t bg_r = (bg >> 11) & 0x1F;
@@ -214,27 +232,23 @@ static uint16_t fade565(uint16_t fg, uint8_t life)
 // ---------------------------------------------------------------------------
 // Calcola rettangolo corrente del serpente lungo il bordo dello schermo
 // ---------------------------------------------------------------------------
-static void getSnakePos(int p, int &x, int &y, int &w, int &h)
-{
+static void getSnakePos(int p, int& x, int& y, int& w, int& h) {
   if (p < disp_w) {
     x = p;
     y = 0;
     w = snake_spd;
     h = snake_w;
-  }
-  else if (p < disp_w + disp_h) {
+  } else if (p < disp_w + disp_h) {
     x = disp_w - snake_w;
     y = p - disp_w;
     w = snake_w;
     h = snake_spd;
-  }
-  else if (p < disp_w * 2 + disp_h) {
+  } else if (p < disp_w * 2 + disp_h) {
     x = (disp_w * 2 + disp_h) - p;
     y = disp_h - snake_w;
     w = snake_spd;
     h = snake_w;
-  }
-  else {
+  } else {
     int t = p - (disp_w * 2 + disp_h);
     x = 0;
     y = disp_h - t - snake_spd;
@@ -246,8 +260,7 @@ static void getSnakePos(int p, int &x, int &y, int &w, int &h)
 // ---------------------------------------------------------------------------
 // Tick animazione snake: avanza, aggiorna coda, applica fading
 // ---------------------------------------------------------------------------
-void tickCountdownSnake()
-{
+void tickCountdownSnake() {
   snake_pos += snake_spd;
   if (snake_pos >= snake_loop) snake_pos = 0;
 
@@ -273,8 +286,7 @@ void tickCountdownSnake()
   }
 
   for (int i = 0; i < trail_len; i++) {
-
-    SnakeSeg &s = trail[i];
+    SnakeSeg& s = trail[i];
 
     if (s.life == 0) {
       gfx->fillRect(s.x, s.y, s.w, s.h, COL_BG);
@@ -282,7 +294,6 @@ void tickCountdownSnake()
     }
 
     uint16_t col = fade565(COL_ACCENT1, s.life);
-
     gfx->fillRect(s.x, s.y, s.w, s.h, col);
 
     if (s.life > 4)

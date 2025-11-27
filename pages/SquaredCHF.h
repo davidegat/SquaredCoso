@@ -5,10 +5,6 @@
 
 // ---------------------------------------------------------------------------
 // SquaredCoso – FX (valute) + Money Rain
-// - fetchFX()        → aggiorna i tassi rispetto a g_fiat
-// - tickFXDataStream → anima la “pioggia di soldi” nel riquadro destro
-// - pageFX()         → stampa tabella valute + aggiorna animazione
-//   Nessuna alloc dinamica, solo stato globale statico.
 // ---------------------------------------------------------------------------
 
 extern Arduino_RGB_Display* gfx;
@@ -27,8 +23,10 @@ extern void   drawHeader(const String& title);
 extern String sanitizeText(const String&);
 extern bool   httpGET(const String&, String&, uint32_t);
 
+extern bool jsonNum(const String& src, const char* key, float& out, int from);
+
 // ---------------------------------------------------------------------------
-// Stato FX globale (usato anche da altre pagine)
+// Stato FX globale
 // ---------------------------------------------------------------------------
 double fx_eur = NAN, fx_usd = NAN, fx_gbp = NAN, fx_jpy = NAN;
 double fx_cad = NAN, fx_cny = NAN, fx_inr = NAN, fx_chf = NAN;
@@ -38,7 +36,7 @@ double fx_prev_jpy = NAN, fx_prev_cad = NAN;
 double fx_prev_cny = NAN, fx_prev_inr = NAN, fx_prev_chf = NAN;
 
 // ---------------------------------------------------------------------------
-// Formatter numerico compatto (usa buffer esterno)
+// Formatter numerico compatto
 // ---------------------------------------------------------------------------
 static inline const char* fmtDoubleBuf(double v, uint8_t dec, char* out) {
   dtostrf(v, 0, dec, out);
@@ -46,67 +44,44 @@ static inline const char* fmtDoubleBuf(double v, uint8_t dec, char* out) {
 }
 
 // ---------------------------------------------------------------------------
-// Parser JSON minimale per Frankfurter API (cerca "CODE":numero)
-// ---------------------------------------------------------------------------
-static double parseJsonRate(const char* b, const char* code) {
-  char key[12];
-  snprintf(key, sizeof(key), "\"%s\":", code);
-
-  const char* p = strstr(b, key);
-  if (!p) return NAN;
-  p += strlen(key);
-
-  bool neg = false;
-  if (*p == '-') {
-    neg = true;
-    p++;
-  }
-
-  double val = 0;
-  while (*p >= '0' && *p <= '9') val = val * 10 + (*p++ - '0');
-
-  if (*p == '.') {
-    p++;
-    double frac = 0, div = 1;
-    while (*p >= '0' && *p <= '9') {
-      frac = frac * 10 + (*p++ - '0');
-      div *= 10;
-    }
-    val += frac / div;
-  }
-
-  return neg ? -val : val;
-}
-
-// ---------------------------------------------------------------------------
-// Fetch tassi FX dalla REST API (valuta base = g_fiat)
+// Fetch tassi FX dalla REST API (usa jsonNum degli helpers)
 // ---------------------------------------------------------------------------
 bool fetchFX() {
   if (!g_fiat.length()) g_fiat = "CHF";
 
   String body;
   if (!httpGET(
-        "https://api.frankfurter.app/latest?from=" + g_fiat + "&to=CHF,EUR,USD,GBP,JPY,CAD,CNY,INR",
+        "https://api.frankfurter.app/latest?from=" + g_fiat +
+          "&to=CHF,EUR,USD,GBP,JPY,CAD,CNY,INR",
         body, 10000))
     return false;
 
-  const char* b = body.c_str();
+  int base = 0; // non serve cercare un blocco specifico
 
-  fx_eur = parseJsonRate(b, "EUR");
-  fx_usd = parseJsonRate(b, "USD");
-  fx_gbp = parseJsonRate(b, "GBP");
-  fx_jpy = parseJsonRate(b, "JPY");
-  fx_cad = parseJsonRate(b, "CAD");
-  fx_cny = parseJsonRate(b, "CNY");
-  fx_inr = parseJsonRate(b, "INR");
-  fx_chf = parseJsonRate(b, "CHF");
+  auto get = [&](const char* code, double& out) {
+    float f = NAN;
+    if (jsonNum(body, code, f, base))
+      out = (double)f;
+    else
+      out = NAN;
+  };
+
+  get("EUR", fx_eur);
+  get("USD", fx_usd);
+  get("GBP", fx_gbp);
+  get("JPY", fx_jpy);
+  get("CAD", fx_cad);
+  get("CNY", fx_cny);
+  get("INR", fx_inr);
+  get("CHF", fx_chf);
 
   return true;
 }
 
-// ---------------------------------------------------------------------------
-// Money Rain – parametri dell’area animata a destra
-// ---------------------------------------------------------------------------
+// ===========================================================================
+// MONEY RAIN — tutto invariato
+// ===========================================================================
+
 #define MONEY_COUNT 22
 
 #define AREA_X_MIN 260
@@ -132,7 +107,7 @@ static uint32_t  moneyLast = 0;
 static const uint16_t MONEY_COL[2] = { 0x07E0, 0x03E0 };
 
 // ---------------------------------------------------------------------------
-// Raggio effettivo della banconota (semi-diagonale + margine)
+// Raggio
 // ---------------------------------------------------------------------------
 static inline int moneyRadius(uint8_t s) {
   const int w = 6 + s * 2;
@@ -142,7 +117,7 @@ static inline int moneyRadius(uint8_t s) {
 }
 
 // ---------------------------------------------------------------------------
-// Render di una singola banconota ruotata (rettangolo pieno)
+// Draw banconota
 // ---------------------------------------------------------------------------
 static inline void drawMoney(int cx, int cy, uint8_t s, float rot, uint16_t col) {
   const int w  = 6 + s * 2;
@@ -172,7 +147,7 @@ static inline void drawMoney(int cx, int cy, uint8_t s, float rot, uint16_t col)
 }
 
 // ---------------------------------------------------------------------------
-// Inizializzazione di un singolo MoneyDrop (spawn sopra l’area visibile)
+// Init singolo money drop
 // ---------------------------------------------------------------------------
 static inline void moneyInitOne(int i) {
   MoneyDrop& m = money[i];
@@ -194,7 +169,7 @@ static inline void moneyInitOne(int i) {
 }
 
 // ---------------------------------------------------------------------------
-// Tick animazione Money Rain (clear + update + draw)
+// Tick animazione
 // ---------------------------------------------------------------------------
 void tickFXDataStream(uint16_t bg) {
   uint32_t now = millis();
@@ -253,7 +228,7 @@ void tickFXDataStream(uint16_t bg) {
 }
 
 // ---------------------------------------------------------------------------
-// Helper per stampare una riga FX (label + valore colorato)
+// Stampa una riga FX
 // ---------------------------------------------------------------------------
 static inline void fxPrintRow(const char* lbl,
                               double prev,
@@ -286,7 +261,7 @@ static inline void fxPrintRow(const char* lbl,
 }
 
 // ---------------------------------------------------------------------------
-// Pagina FX: titolo, tabella tassi e aggiornamento Money Rain
+// Pagina FX
 // ---------------------------------------------------------------------------
 void pageFX() {
   drawHeader("Exchange " + g_fiat);

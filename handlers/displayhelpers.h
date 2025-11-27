@@ -1,47 +1,43 @@
 #pragma once
 /* ============================================================================
    DISPLAY HELPERS — SquaredCoso
-   Modulo grafico centrale: splash, fade, RLE, UI text helpers, unicode,
-   JSON utilities e funzioni di pagina. Tutto inline per zero RAM.
+   Modulo grafico centrale:
+   - inizializzazione pannello ST7701
+   - fade-in/out del backlight
+   - splash screen RLE 480×480
+   - rendering testi (bold, paragraph, header)
+   - sanitizzazione UTF-8, escape JSON
+   - piccoli helper per data/ora
+   - mini-parser JSON per chiave/valore
+   - funzioni paging (mask ↔ array)
 ============================================================================ */
 
 #include <Arduino.h>
 #include <Arduino_GFX_Library.h>
 #include "globals.h"
 
-// accesso al display condiviso
+// Display condiviso
 extern Arduino_RGB_Display* gfx;
 
+
 /* ============================================================================
-   BACKLIGHT
+   BACKLIGHT (PWM su pin 38)
 ============================================================================ */
-#define GFX_BL       38
-#define PWM_CHANNEL   0
-#define PWM_FREQ   1000
-#define PWM_BITS      8
+#define GFX_BL        38
+#define PWM_CHANNEL    0
+#define PWM_FREQ    1000
+#define PWM_BITS       8
 
 
 /* ============================================================================
-   STRUTTURE RLE (immagini splash 480×480)
-============================================================================ */
-//typedef struct {
-//  uint16_t color;
-//  uint16_t count;
-//} RLERun;
-
-//struct CosinoRLE {
-//  const RLERun* data;
-//  size_t runs;
-//};
-
-
-/* ============================================================================
-   drawRLE – decodifica 480×480 RGB565 RLE
+   drawRLE — Decodifica immagini RLE 480×480 RGB565 (splash/logo)
+   Ogni "run" contiene: colore + conteggio pixel consecutivi
 ============================================================================ */
 inline void drawRLE(int x, int y, int w, int h,
                     const RLERun* data, size_t runs)
 {
   static uint16_t lineBuf[480];
+
   int runIndex = 0;
   int runOffset = 0;
 
@@ -51,14 +47,15 @@ inline void drawRLE(int x, int y, int w, int h,
     while (filled < w && runIndex < (int)runs) {
       uint16_t col = data[runIndex].color;
       uint16_t cnt = data[runIndex].count - runOffset;
-      int toCopy = (cnt < (w - filled)) ? cnt : (w - filled);
+      int toCopy = min<int>(cnt, w - filled);
 
-      for (int i = 0; i < toCopy; i++) lineBuf[filled + i] = col;
+      for (int i = 0; i < toCopy; i++)
+        lineBuf[filled + i] = col;
 
       filled += toCopy;
 
       if (toCopy == cnt) { runIndex++; runOffset = 0; }
-      else runOffset += toCopy;
+      else               runOffset += toCopy;
     }
 
     gfx->draw16bitRGBBitmap(x, y + py, lineBuf, w, 1);
@@ -67,7 +64,7 @@ inline void drawRLE(int x, int y, int w, int h,
 
 
 /* ============================================================================
-   FADE VELOCI (cambio pagina)
+   FADE VELOCI (transizioni pagina)
 ============================================================================ */
 inline void quickFadeOut() {
   const int maxDuty = (1 << PWM_BITS) - 1;
@@ -76,6 +73,7 @@ inline void quickFadeOut() {
     delay(2);
   }
 }
+
 inline void quickFadeIn() {
   const int maxDuty = (1 << PWM_BITS) - 1;
   for (int i = 0; i <= 50; i++) {
@@ -86,7 +84,7 @@ inline void quickFadeIn() {
 
 
 /* ============================================================================
-   Kickstart pannello ST7701
+   Kickstart pannello ST7701 (inizializzazione sequenza)
 ============================================================================ */
 inline void panelKickstart() {
   delay(50);
@@ -99,9 +97,10 @@ inline void panelKickstart() {
 
 
 /* ============================================================================
-   SPLASH PRINCIPALE (fade-in)
+   SPLASH pieni (solo fade-in, o fade-in → hold → fade-out)
 ============================================================================ */
-inline void showSplashFadeInOnly(const RLERun* rle, size_t runs, uint16_t holdMs) {
+inline void showSplashFadeInOnly(const RLERun* rle, size_t runs, uint16_t holdMs)
+{
   gfx->fillScreen(RGB565_BLACK);
   drawRLE(0, 0, 480, 480, rle, runs);
 
@@ -109,35 +108,37 @@ inline void showSplashFadeInOnly(const RLERun* rle, size_t runs, uint16_t holdMs
   ledcAttachPin(GFX_BL, PWM_CHANNEL);
 
   const int maxDuty = (1 << PWM_BITS) - 1;
+
+  // fade-in lento
   for (int i = 0; i <= 500; i++) {
     ledcWrite(PWM_CHANNEL, (maxDuty * i) / 500);
     delay(5);
   }
+
   delay(holdMs);
 }
 
-
-/* ============================================================================
-   SPLASH → nero (fade-out)
-============================================================================ */
 inline void splashFadeOut() {
   const int maxDuty = (1 << PWM_BITS) - 1;
+
   for (int i = 250; i >= 0; i--) {
     ledcWrite(PWM_CHANNEL, (maxDuty * i) / 250);
     delay(5);
   }
+
   gfx->fillScreen(COL_BG);
 }
 
 
 /* ============================================================================
-   FADE-IN UI dopo splash / pagina
+   FADE-IN UI (dopo splash o cambio pagina)
 ============================================================================ */
 inline void fadeInUI() {
   ledcSetup(PWM_CHANNEL, PWM_FREQ, PWM_BITS);
   ledcAttachPin(GFX_BL, PWM_CHANNEL);
 
   const int maxDuty = (1 << PWM_BITS) - 1;
+
   ledcWrite(PWM_CHANNEL, 0);
   for (int i = 0; i <= 250; i++) {
     ledcWrite(PWM_CHANNEL, (maxDuty * i) / 250);
@@ -147,9 +148,10 @@ inline void fadeInUI() {
 
 
 /* ============================================================================
-   Splash “cosino” (rotazione pagine)
+   Splash “cosino” per rotazione pagina (fade-in + hold)
 ============================================================================ */
-inline void showCycleSplash(const RLERun* data, size_t runs, uint16_t holdMs) {
+inline void showCycleSplash(const RLERun* data, size_t runs, uint16_t holdMs)
+{
   gfx->fillScreen(RGB565_BLACK);
   drawRLE(0, 0, 480, 480, data, runs);
 
@@ -157,23 +159,29 @@ inline void showCycleSplash(const RLERun* data, size_t runs, uint16_t holdMs) {
   ledcAttachPin(GFX_BL, PWM_CHANNEL);
 
   const int maxDuty = (1 << PWM_BITS) - 1;
+
   for (int i = 0; i <= 500; i++) {
     ledcWrite(PWM_CHANNEL, (maxDuty * i) / 500);
     delay(5);
   }
+
   delay(holdMs);
 }
 
 
 /* ============================================================================
-   sanitizeText – ASCII safe (news, meteo, QOD)
+   sanitizeText — converte UTF-8 accentate in ASCII safe
+   Usato da: News, Meteo, QOD
 ============================================================================ */
 inline String sanitizeText(const String& in) {
   String out;
   out.reserve(in.length());
+
   for (int i = 0; i < in.length();) {
     uint8_t c = (uint8_t)in[i];
+
     if (c < 0x80) { out += (char)c; i++; continue; }
+
     if (c == 0xC3 && i + 1 < in.length()) {
       uint8_t c2 = (uint8_t)in[i + 1];
       switch (c2) {
@@ -184,11 +192,13 @@ inline String sanitizeText(const String& in) {
         case 0xB9: case 0xBA: out += 'u'; break;
         default: out += '?';
       }
-      i += 2;
-      continue;
+      i += 2; continue;
     }
-    out += '?'; i++;
+
+    out += '?';
+    i++;
   }
+
   while (out.indexOf("  ") >= 0) out.replace("  ", " ");
   out.trim();
   return out;
@@ -196,34 +206,44 @@ inline String sanitizeText(const String& in) {
 
 
 /* ============================================================================
-   decodeJsonUnicode – decodifica \uXXXX (OpenAI)
+   decodeJsonUnicode — converte sequenze \uXXXX in UTF-8 reale
+   Usato nel parsing OpenAI JSON
 ============================================================================ */
 inline String decodeJsonUnicode(const String& s) {
   String out; out.reserve(s.length());
+
   for (int i = 0; i < s.length(); i++) {
     if (s[i]=='\\' && i+5<s.length() && s[i+1]=='u') {
       int code = strtol(s.substring(i+2,i+6).c_str(), nullptr, 16);
-      if (code<0x80)      out += char(code);
-      else if (code<0x800){ out+=char(0xC0|(code>>6)); out+=char(0x80|(code&0x3F));}
-      else { out+=char(0xE0|(code>>12)); out+=char(0x80|((code>>6)&0x3F)); out+=char(0x80|(code&0x3F)); }
-      i+=5;
-    } else out+=s[i];
+
+      if (code < 0x80) out += char(code);
+      else if (code < 0x800) {
+        out += char(0xC0 | (code >> 6));
+        out += char(0x80 | (code & 0x3F));
+      } else {
+        out += char(0xE0 | (code >> 12));
+        out += char(0x80 | ((code >> 6) & 0x3F));
+        out += char(0x80 | (code & 0x3F));
+      }
+
+      i += 5;
+    } else out += s[i];
   }
   return out;
 }
 
 
 /* ============================================================================
-   jsonEscape – per body OpenAI
+   jsonEscape — escape per body OpenAI
 ============================================================================ */
 inline String jsonEscape(const String& s) {
   String o; o.reserve(s.length()+8);
-  for (int i=0;i<s.length();i++) {
-    char c=s[i];
-    if(c=='\\')o+="\\\\";
-    else if(c=='\"')o+="\\\"";
-    else if(c=='\n')o+="\\n";
-    else if(c=='\r')o+="\\r";
+
+  for (char c : s) {
+    if (c=='\\') o+="\\\\";
+    else if(c=='\"') o+="\\\"";
+    else if(c=='\n') o+="\\n";
+    else if(c=='\r') o+="\\r";
     else o+=c;
   }
   return o;
@@ -231,12 +251,13 @@ inline String jsonEscape(const String& s) {
 
 
 /* ============================================================================
-   drawBoldTextColored / drawBoldMain – testo “bold” 4-offset
+   TEXT RENDERING — bold offset 4px e paragrafi word-wrap
 ============================================================================ */
-inline void drawBoldTextColored(int16_t x,int16_t y,const String& raw,
-                                uint16_t fg,uint16_t bg,uint8_t scale=TEXT_SCALE)
+inline void drawBoldTextColored(int16_t x, int16_t y, const String& raw,
+                                uint16_t fg, uint16_t bg, uint8_t scale=TEXT_SCALE)
 {
   String s = sanitizeText(raw);
+
   gfx->setTextSize(scale);
   gfx->setTextColor(fg,bg);
 
@@ -255,12 +276,13 @@ inline void drawBoldMain(int16_t x,int16_t y,const String& raw){
 
 
 /* ============================================================================
-   drawHeader – barra superiore con titolo + ora
+   drawHeader — barra superiore con titolo pagina + ora corrente
 ============================================================================ */
 inline String getFormattedDateTime(); // forward
 
 inline void drawHeader(const String& titleRaw) {
   gfx->fillRect(0,0,480,50,COL_HEADER);
+
   drawBoldTextColored(16,20,sanitizeText(titleRaw),COL_TEXT,COL_HEADER);
 
   String dt = getFormattedDateTime();
@@ -272,15 +294,16 @@ inline void drawHeader(const String& titleRaw) {
 
 
 /* ============================================================================
-   drawHLine – linea UI
+   drawHLine — linea orizzontale divisoria UI
 ============================================================================ */
 inline void drawHLine(int y){
-  gfx->drawLine(PAGE_X,y,PAGE_X+PAGE_W,y,COL_DIVIDER);
+  gfx->drawLine(PAGE_X, y, PAGE_X + PAGE_W, y, COL_DIVIDER);
 }
 
 
 /* ============================================================================
-   drawParagraph – word wrap
+   drawParagraph — testo multi-linea con word-wrap
+   NO background, solo colore testo
 ============================================================================ */
 inline void drawParagraph(int16_t x,int16_t y,int16_t w,
                           const String& text,uint8_t scale)
@@ -289,26 +312,29 @@ inline void drawParagraph(int16_t x,int16_t y,int16_t w,
   if (maxChars < 8) maxChars = 8;
 
   gfx->setTextSize(scale);
-  gfx->setTextColor(COL_TEXT,COL_BG);
+  gfx->setTextColor(COL_TEXT, COL_TEXT);  // nessuno sfondo visibile
 
   String s = sanitizeText(text);
-  int start=0;
+  int start = 0;
 
   while (start < s.length()) {
     int len = min(maxChars, (int)s.length()-start);
-    int cut = start+len;
+    int cut = start + len;
 
+    // cerca spazio precedente per evitare spezzature brutte
     if (cut < s.length()) {
       int sp = s.lastIndexOf(' ', cut);
       if (sp > start) cut = sp;
     }
 
-    String line = s.substring(start,cut);
+    String line = s.substring(start, cut);
     line.trim();
 
-    gfx->setCursor(x,y); gfx->print(line);
+    gfx->setCursor(x, y);
+    gfx->print(line);
+
     y += BASE_CHAR_H * scale + 6;
-    start = (cut < s.length() && s[cut]==' ') ? cut+1 : cut;
+    start = (cut < s.length() && s[cut]==' ') ? cut + 1 : cut;
 
     if (y > 470) break;
   }
@@ -320,111 +346,125 @@ inline void drawParagraph(int16_t x,int16_t y,int16_t w,
 ============================================================================ */
 inline String getFormattedDateTime(){
   extern bool g_timeSynced;
-  if(!g_timeSynced)return "";
+  if (!g_timeSynced) return "";
+
   time_t now; struct tm t;
   time(&now); localtime_r(&now,&t);
+
   char buf[32];
-  snprintf(buf,sizeof(buf),"%02d/%02d - %02d:%02d",
-           t.tm_mday,t.tm_mon+1,t.tm_hour,t.tm_min);
+  snprintf(buf,sizeof(buf), "%02d/%02d - %02d:%02d",
+           t.tm_mday, t.tm_mon+1, t.tm_hour, t.tm_min);
   return String(buf);
 }
 
 inline void todayYMD(String& ymd){
   time_t now; struct tm t;
   time(&now); localtime_r(&now,&t);
+
   char buf[16];
-  snprintf(buf,sizeof(buf),"%04d%02d%02d",
-           t.tm_year+1900,t.tm_mon+1,t.tm_mday);
-  ymd=buf;
+  snprintf(buf,sizeof(buf), "%04d%02d%02d",
+           t.tm_year+1900, t.tm_mon+1, t.tm_mday);
+  ymd = buf;
 }
 
 inline String formatShortDate(time_t tt){
   struct tm t; localtime_r(&tt,&t);
   char buf[8];
-  snprintf(buf,sizeof(buf),"%02d/%02d",t.tm_mday,t.tm_mon+1);
+  snprintf(buf,sizeof(buf), "%02d/%02d", t.tm_mday, t.tm_mon+1);
   return String(buf);
 }
 
 
 /* ============================================================================
-   JSON HELPERS
+   JSON HELPERS — mini-parser manuale per ridurre RAM
 ============================================================================ */
 inline bool jsonFindStringKV(const String& body,const String& key,
-                              int from,String& outVal)
+                             int from,String& outVal)
 {
-  String k="\"" + key + "\"";
-  int p=body.indexOf(k,from); if(p<0)return false;
-  p=body.indexOf(':',p); if(p<0)return false;
-  int q1=body.indexOf('"',p+1); if(q1<0)return false;
-  int q2=body.indexOf('"',q1+1); if(q2<0)return false;
-  outVal=body.substring(q1+1,q2);
+  String k = "\"" + key + "\"";
+  int p = body.indexOf(k,from); if(p<0) return false;
+  p = body.indexOf(':',p);     if(p<0) return false;
+
+  int q1=body.indexOf('"',p+1); if(q1<0) return false;
+  int q2=body.indexOf('"',q1+1); if(q2<0) return false;
+
+  outVal = body.substring(q1+1, q2);
   return true;
 }
 
 inline bool jsonFindIntKV(const String& body,const String& key,
-                           int from,int& outVal)
+                          int from,int& outVal)
 {
-  String k="\"" + key + "\"";
-  int p=body.indexOf(k,from); if(p<0)return false;
-  p=body.indexOf(':',p); if(p<0)return false;
+  String k = "\"" + key + "\"";
+  int p = body.indexOf(k,from); if(p<0) return false;
+  p = body.indexOf(':',p);      if(p<0) return false;
 
-  int s=p+1;
-  while(s<body.length() && isspace(body[s])) s++;
+  int s = p + 1;
+  while (s < body.length() && isspace(body[s])) s++;
 
-  int e=s;
-  while(e<body.length() && isdigit(body[e])) e++;
+  int e = s;
+  while (e < body.length() && isdigit(body[e])) e++;
 
-  if(e<=s)return false;
+  if (e <= s) return false;
+
   outVal = body.substring(s,e).toInt();
   return true;
 }
 
 
 /* ============================================================================
-   PAGING HELPERS
+   PAGING HELPERS — gestione pagine attive (mask ↔ array)
 ============================================================================ */
 extern bool g_show[];
-extern int g_page;
+extern int  g_page;
 
 inline uint16_t pagesMaskFromArray(){
-  uint16_t m=0; for(int i=0;i<PAGES;i++) if(g_show[i]) m|=(1u<<i);
+  uint16_t m=0;
+  for(int i=0;i<PAGES;i++)
+    if(g_show[i]) m |= (1u<<i);
   return m;
 }
 
 inline void pagesArrayFromMask(uint16_t m){
-  for(int i=0;i<PAGES;i++) g_show[i]=(m&(1u<<i))!=0;
+  for(int i=0;i<PAGES;i++)
+    g_show[i] = (m & (1u<<i)) != 0;
 
   bool any=false;
-  for(int i=0;i<PAGES;i++) if(g_show[i]){any=true;break;}
+  for(int i=0;i<PAGES;i++)
+    if(g_show[i]) { any=true; break; }
+
   if(!any){
     for(int i=0;i<PAGES;i++) g_show[i]=false;
-    g_show[P_CLOCK]=true;
+    g_show[P_CLOCK] = true;
   }
 }
 
 inline int firstEnabledPage(){
-  for(int i=0;i<PAGES;i++) if(g_show[i]) return i;
+  for(int i=0;i<PAGES;i++)
+    if(g_show[i]) return i;
   return -1;
 }
 
 inline bool advanceToNextEnabled(){
-  int f=firstEnabledPage(); if(f<0)return false;
-  for(int k=0;k<PAGES;k++){
-    g_page=(g_page+1)%PAGES;
-    if(g_show[g_page]) return true;
+  int f = firstEnabledPage();
+  if (f < 0) return false;
+
+  for (int k=0; k<PAGES; k++) {
+    g_page = (g_page + 1) % PAGES;
+    if (g_show[g_page]) return true;
   }
   return false;
 }
 
 inline void ensureCurrentPageEnabled(){
-  if(g_show[g_page])return;
-  int f=firstEnabledPage();
-  if(f>=0) g_page=f;
+  if (g_show[g_page]) return;
+
+  int f = firstEnabledPage();
+  if (f >= 0) g_page = f;
   else {
-    g_page=P_CLOCK;
-    for(int i=0;i<PAGES;i++)g_show[i]=false;
-    g_show[P_CLOCK]=true;
+    g_page = P_CLOCK;
+    for(int i=0;i<PAGES;i++) g_show[i]=false;
+    g_show[P_CLOCK] = true;
   }
 }
-
 

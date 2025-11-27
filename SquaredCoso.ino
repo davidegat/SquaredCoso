@@ -1,3 +1,8 @@
+const char* FW_NAME = "SquaredCoso";
+const char* FW_VERSION = "v1.0.1";
+extern const char* FW_NAME;
+extern const char* FW_VERSION;
+
 /*
    ============================================================================
    SquaredCoso – Gat Multi Ticker (ESP32-S3 + ST7701 480x480 RGB panel)
@@ -29,14 +34,6 @@
      al repository ufficiale SquaredCoso
 */
 
-// ---------------------------------------------------------------------------
-// Firmware name + version
-// ---------------------------------------------------------------------------
-const char* FW_NAME = "SquaredCoso";
-const char* FW_VERSION = "v1.0.0";
-extern const char* FW_NAME;
-extern const char* FW_VERSION;
-
 #include <Arduino.h>
 #include <Wire.h>
 #include <Preferences.h>
@@ -51,12 +48,12 @@ extern const char* FW_VERSION;
 
 int indexOfCI(const String& src, const String& key, int from = 0);
 
-// handler di base (config, UI, layout, helpers)
-#include "handlers/globals.h"
+// handlers
 #include "handlers/settingshandler.h"
 #include "handlers/displayhelpers.h"
+#include "handlers/jsonhelpers.h"
 
-// immagini e cicli RLE
+// immagini
 #include "images/SquaredCoso.h"
 #include "images/cosino.h"
 #include "images/cosino1.h"
@@ -78,41 +75,57 @@ int indexOfCI(const String& src, const String& key, int from = 0);
 #include "pages/SquaredHA.h"
 #include "pages/SquaredStellar.h"
 #include "pages/SquaredBinary.h"
+#include "pages/SquaredNotes.h"
+#include "pages/SquaredChronos.h"
 
 // -----------------------------------------------------------------------------
 // CONFIG APPLICAZIONE
 // -----------------------------------------------------------------------------
-String g_rss_url = "https://feeds.bbci.co.uk/news/rss.xml";
+// --- Countdown ---------------------------------------------------------------
+CDEvent cd[8];
+
+// --- Rotazione pagine --------------------------------------------------------
+uint32_t PAGE_INTERVAL_MS = 15000;
+int g_page = 0;
+bool g_cycleCompleted = false;
+
+// --- Localizzazione / Lingua -------------------------------------------------
 String g_city = "Bellinzona";
 String g_lang = "it";
 String g_ics = "";
 String g_lat = "";
 String g_lon = "";
-uint32_t PAGE_INTERVAL_MS = 15000;
+
+// --- API & integrazioni ------------------------------------------------------
+String g_rss_url = "https://feeds.bbci.co.uk/news/rss.xml";
 String g_ha_ip = "";
 String g_ha_token = "";
-
-CDEvent cd[8];
-
 String g_oa_key = "";
 String g_oa_topic = "";
 
-int g_page = 0;
-bool g_cycleCompleted = false;
+// --- Note (Post-it) ----------------------------------------------------------
+String g_note = "";
 
+// --- Bitcoin -----------------------------------------------------------------
+double g_btc_owned = NAN;
+String g_fiat = "CHF";
+
+// --- Stato pagine -------------------------------------------------------------
 bool g_show[PAGES] = {
   true, true, true, true, true,
   true, true, true, true, true,
   true, true, true
 };
+
 bool g_pageDirty[PAGES] = { false };
-static int lastSecond = -1;
 
-double g_btc_owned = NAN;
-String g_fiat = "CHF";
-
+// --- Flag runtime -------------------------------------------------------------
 volatile bool g_dataRefreshPending = false;
 bool g_splash_enabled = true;
+
+// --- Varie interne ------------------------------------------------------------
+static int lastSecond = -1;
+
 
 // -----------------------------------------------------------------------------
 // GEOCODING OPEN-METEO (auto-lat/lon se mancano in config)
@@ -174,7 +187,7 @@ Arduino_RGB_Display* gfx = new Arduino_RGB_Display(
   st7701_type9_init_operations, sizeof(st7701_type9_init_operations));
 
 // -----------------------------------------------------------------------------
-// TEMA COLORE PRINCIPALE (Aurora / Neon dark)
+// TEMA COLORE PRINCIPALE
 // -----------------------------------------------------------------------------
 const uint16_t COL_BG = 0x1B70;
 const uint16_t COL_HEADER = 0x2967;
@@ -232,7 +245,7 @@ static bool waitForValidTime(uint32_t timeoutMs = 8000) {
   return false;
 }
 
-static void syncTimeFromNTP() {
+void syncTimeFromNTP() {
   if (g_timeSynced) return;
   configTime(GMT_OFFSET_SEC, DAYLIGHT_OFFSET_SEC, NTP_SERVER);
   g_timeSynced = waitForValidTime(8000);
@@ -257,7 +270,6 @@ static void drawAPScreenOnce(const String& ssid, const String& pass) {
   gfx->fillScreen(COL_BG);
   drawBoldTextColored(16, 36, F("Connettiti all'AP:"), COL_TEXT, COL_BG);
   drawBoldTextColored(16, 66, ssid, COL_TEXT, COL_BG);
-
   gfx->setTextSize(1);
   gfx->setTextColor(COL_TEXT, COL_BG);
   gfx->setCursor(16, 96);
@@ -321,7 +333,6 @@ static bool tryConnectSTA(uint32_t timeoutMs = 8000) {
 
 bool httpGET(const String& url, String& body, uint32_t timeoutMs = 10000);
 
-
 // -----------------------------------------------------------------------------
 // REFRESH DATI PERIODICO
 // -----------------------------------------------------------------------------
@@ -367,6 +378,8 @@ void drawCurrentPage() {
     case P_NEWS: pageNews(); break;
     case P_HA: pageHA(); break;
     case P_STELLAR: pageStellar(); break;
+    case P_NOTES: pageNotes(); break;
+    case P_CHRONOS: pageChronos(); break;
   }
 }
 
@@ -438,6 +451,8 @@ void refreshAll() {
   }
 }
 
+
+
 // -----------------------------------------------------------------------------
 // SELEZIONE RLE "COSINO" RANDOM PER SPLASH DI CICLO
 // -----------------------------------------------------------------------------
@@ -456,17 +471,20 @@ void setup() {
   panelKickstart();
 
   // splash iniziale (fade-in)
+  showSplashFadeInOnly(SquaredCoso, SquaredCoso_count, 2000);
+
   // ---------------------------------------------------------------------------
-  // Mostra versione firmware nello spigolo inferiore destro dello splash
+  // Mostra versione firmware sopra allo splash (centrato, in basso)
   // ---------------------------------------------------------------------------
-  gfx->setTextSize(1);
-  gfx->setTextColor(COL_TEXT, COL_BG);
+  gfx->setTextSize(2);
+  gfx->setTextColor(COL_TEXT);
 
   int fwLen = strlen(FW_VERSION) * BASE_CHAR_W;
-  int fwX = gfx->width() - fwLen - 6;         // 6px di margine dal bordo destro
-  int fwY = gfx->height() - BASE_CHAR_H - 6;  // 6px dal bordo inferiore
+  const int M = 8;
+  int fwX = gfx->width() - fwLen - M;
+  int fwY = gfx->height() - BASE_CHAR_H - M;
 
-  gfx->setCursor(fwX, fwY);
+  gfx->setCursor(fwX - 30, fwY);
   gfx->print(FW_VERSION);
 
   loadAppConfig();
@@ -479,26 +497,31 @@ void setup() {
     g_dataRefreshPending = true;
   }
 
+  // Fai il refresh ma NON ridisegnare subito la pagina
   refreshAll();
+
+  // Marca la pagina corrente come dirty: verrà disegnata UNA SOLA VOLTA dopo lo splash
+  g_pageDirty[g_page] = true;
 
   // ---- se esiste UNA sola pagina attiva → niente splashFadeOut ----
   if (countEnabledPages() == 1) {
     g_bootPhase = false;
 
     g_page = firstEnabledPage();
+    fadeInUI();  // fai direttamente il fade-in UNA sola volta
     gfx->fillScreen(COL_BG);
     drawCurrentPage();
 
     lastPageSwitch = millis();
-    return;  // << STOP QUI, nessun fade-out deve eseguire
+    return;
   }
 
   // ---- 2+ pagine → comportamento normale ----
-  splashFadeOut();
+  fadeInUI();  // il fade-in deve precedere l'unico draw
   g_bootPhase = false;
 
-  drawCurrentPage();
-  fadeInUI();
+  gfx->fillScreen(COL_BG);
+  drawCurrentPage();  // DISEGNO UNICO, niente doppioni
 }
 
 // -----------------------------------------------------------------------------

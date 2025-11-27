@@ -11,6 +11,8 @@
 
 #include <Arduino.h>
 #include "../handlers/globals.h"
+#include "../handlers/displayhelpers.h"
+#include "../handlers/jsonhelpers.h"
 
 // ---------------------------------------------------------------------------
 // EXTERN (dal core di SquaredCoso)
@@ -46,11 +48,11 @@ extern uint16_t g_air_bg;
 #define AIR_BG_VERYPOOR   0xF800
 
 // ---------------------------------------------------------------------------
-// COLORI PER I VALORI NUMERICI (non lo sfondo)
+// COLORI PER I VALORI NUMERICI
 // ---------------------------------------------------------------------------
-#define AIR_VAL_GOOD      0x0400  // verde scuro
-#define AIR_VAL_FAIR      0x84C0  // giallo scuro
-#define AIR_VAL_POOR      0x8000  // rosso scuro
+#define AIR_VAL_GOOD      0x07E0  // verde neon
+#define AIR_VAL_FAIR      0xFFE0  // giallo brillante
+#define AIR_VAL_POOR      0xF800  // rosso vivo
 
 // ---------------------------------------------------------------------------
 // SOGLIE QUALITÀ ARIA (µg/m³) – modificabili via variabile
@@ -70,32 +72,7 @@ static float aq_pm10 = NAN;
 static float aq_o3   = NAN;
 static float aq_no2  = NAN;
 
-// ---------------------------------------------------------------------------
-// PARSING JSON MINIMALE PER OPEN-METEO AIR QUALITY
-// ---------------------------------------------------------------------------
-static bool extractObjectBlock(const String& body, const char* key, String& out) {
-  const String k = String("\"") + key + "\"";
-  const int p = indexOfCI(body, k, 0);
-  if (p < 0) return false;
 
-  const int b = body.indexOf('{', p);
-  if (b < 0) return false;
-
-  int depth = 0;
-  const int len = body.length();
-  for (int i = b; i < len; i++) {
-    char c = body.charAt(i);
-    if (c == '{') depth++;
-    else if (c == '}') {
-      depth--;
-      if (depth == 0) {
-        out = body.substring(b, i + 1);
-        return true;
-      }
-    }
-  }
-  return false;
-}
 
 // Estrae il primo valore dell'array numerico "key": [ ... ]
 static float parseFirstNumber(const String& obj, const char* key) {

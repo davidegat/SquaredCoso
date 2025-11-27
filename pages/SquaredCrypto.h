@@ -5,9 +5,6 @@
 
 // ---------------------------------------------------------------------------
 // SquaredCoso – Pagina "CRYPTO – BITCOIN"
-// - fetchCryptoWrapper() → aggiorna prezzo BTC e variazione 24h da CoinGecko
-// - pageCryptoWrapper()  → rende prezzo, change 24h e valore totale posseduto
-//   Parsing JSON minimale, nessuna alloc dinamica extra, solo stato statico.
 // ---------------------------------------------------------------------------
 
 // risorse condivise dal core
@@ -35,8 +32,11 @@ extern void   drawHeader(const String& title);
 extern void   drawHLine(int y);
 extern void   drawBoldMain(int16_t x, int16_t y, const String& raw, uint8_t scale);
 
+
+extern bool jsonNum(const String& src, const char* key, float& out, int from);
+
 // ---------------------------------------------------------------------------
-// Stato locale del modulo crypto (prezzo, change 24h, timestamp ultimo fetch)
+// Stato locale del modulo crypto
 // ---------------------------------------------------------------------------
 static double   cr_price          = NAN;
 static double   cr_prev_price     = NAN;
@@ -44,39 +44,7 @@ static double   cr_chg24          = NAN;
 static uint32_t cr_last_update_ms = 0;
 
 // ---------------------------------------------------------------------------
-// Parsing JSON: cerca "key": NUMBER all'interno del body
-// ---------------------------------------------------------------------------
-static bool crFindNumberKV(const String& body,
-                           const char* key,
-                           int from,
-                           double& outVal)
-{
-  char kbuf[48];
-  snprintf(kbuf, sizeof(kbuf), "\"%s\"", key);
-
-  const char* base  = body.c_str();
-  const char* start = base + from;
-
-  const char* p = strstr(start, kbuf);
-  if (!p) return false;
-
-  const char* colon = strchr(p, ':');
-  if (!colon) return false;
-
-  const char* s = colon + 1;
-
-  while (*s == ' ' || *s == '\n' || *s == '\r' || *s == '\t') s++;
-
-  char*  endptr = nullptr;
-  double val    = strtod(s, &endptr);
-  if (endptr == s) return false;
-
-  outVal = val;
-  return true;
-}
-
-// ---------------------------------------------------------------------------
-// Format importo fiat con separatori migliaia, centesimi opzionali
+// Format importo fiat con separatori migliaia
 // ---------------------------------------------------------------------------
 static String crFmtFiat(double v)
 {
@@ -116,7 +84,7 @@ static String crFmtFiat(double v)
 }
 
 // ---------------------------------------------------------------------------
-// Format quantità BTC con 8 decimali, notazione europea (virgola)
+// Format quantità BTC (8 decimali)
 // ---------------------------------------------------------------------------
 static String crFmtBTC(double v)
 {
@@ -127,7 +95,7 @@ static String crFmtBTC(double v)
 }
 
 // ---------------------------------------------------------------------------
-// Fetch da CoinGecko: prezzo BTC in g_fiat + variazione 24h
+// Fetch da CoinGecko (usa jsonNum invece di parsing manuale)
 // ---------------------------------------------------------------------------
 static bool fetchCrypto()
 {
@@ -149,26 +117,30 @@ static bool fetchCrypto()
   int b = indexOfCI(body, "\"bitcoin\"", 0);
   if (b < 0) return false;
 
-  double price = NAN;
-  if (!crFindNumberKV(body, fiat.c_str(), b, price))
+
+  float priceF = NAN;
+  if (!jsonNum(body, fiat.c_str(), priceF, b))
     return false;
 
-  double pct = NAN;
+  double price = (double)priceF;
+
+
+  float pctF = NAN;
   {
     String k = fiat + "_24h_change";
-    (void)crFindNumberKV(body, k.c_str(), b, pct);
+    jsonNum(body, k.c_str(), pctF, b);
   }
 
-  cr_prev_price      = cr_price;
-  cr_price           = price;
-  cr_chg24           = pct;
-  cr_last_update_ms  = millis();
+  cr_prev_price     = cr_price;
+  cr_price          = price;
+  cr_chg24          = (double)pctF;
+  cr_last_update_ms = millis();
 
   return true;
 }
 
 // ---------------------------------------------------------------------------
-// Render pagina: prezzo grande, change 24h e valore totale BTC posseduto
+// Render pagina BTC
 // ---------------------------------------------------------------------------
 static void pageCrypto()
 {
@@ -244,7 +216,7 @@ static void pageCrypto()
 }
 
 // ---------------------------------------------------------------------------
-// Wrapper usati dal main (nomi stabili per il page-router)
+// Wrapper (usati dal page-router)
 // ---------------------------------------------------------------------------
 inline bool fetchCryptoWrapper() { return fetchCrypto(); }
 inline void pageCryptoWrapper()  { pageCrypto(); }

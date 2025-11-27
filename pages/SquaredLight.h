@@ -4,21 +4,29 @@
 #include <time.h>
 #include <math.h>
 #include "../handlers/globals.h"
+#include "../handlers/jsonhelpers.h"
+// ============================================================================
+// FORWARD: timezone helper
+// ============================================================================
+static inline long calcTZ();
 
-// ---------------------------------------------------------------------------
-// IMMAGINE LUNA RLE
-// ---------------------------------------------------------------------------
-#include "../images/luna.h"  // definisce: LUNA_WIDTH, LUNA_HEIGHT, luna[] (RLERun)
+// ============================================================================
+// timegm replacement for ESP32
+// ============================================================================
+static time_t timegm_esp32(struct tm *tm) {
+    time_t local = mktime(tm);               // interpreta tm come ora locale
+    return local - calcTZ()*3600;            // converti in UTC
+}
 
-// Wrapper CosinoRLE per la nostra luna RLE
+// ============================================================================
+// IMMAGINE LUNA (RLE)
+// ============================================================================
+#include "../images/luna.h"
+
 static const CosinoRLE LUNA_ART = {
   luna,
   sizeof(luna) / sizeof(RLERun)
 };
-
-// ---------------------------------------------------------------------------
-// SquaredCoso – Pagina SUN
-// ---------------------------------------------------------------------------
 
 extern Arduino_RGB_Display* gfx;
 
@@ -33,15 +41,18 @@ extern const int BASE_CHAR_W;
 extern const int BASE_CHAR_H;
 extern const int TEXT_SCALE;
 
+extern String g_city;
+extern String g_lat;
+extern String g_lon;
+extern String g_lang;
+
 extern void drawHeader(const String& title);
 extern void drawBoldMain(int16_t x, int16_t y, const String& raw, uint8_t scale);
 extern bool httpGET(const String& url, String& body, uint32_t timeoutMs);
 
-extern String g_lat, g_lon, g_lang;
-
-// ---------------------------------------------------------------------------
-// Cache
-// ---------------------------------------------------------------------------
+// ============================================================================
+// CACHE SOLE
+// ============================================================================
 static char sun_rise[6];
 static char sun_set[6];
 static char sun_noon[6];
@@ -50,134 +61,73 @@ static char sun_ce[6];
 static char sun_len[16];
 static char sun_uvi[8];
 
-static float g_moon_phase_days = -1.0f;
-static float g_moon_illum01 = -1.0f;
-static bool g_moon_waxing = true;
-static uint8_t g_moon_phase_idx = 0;
+// ============================================================================
+// CACHE LUNA
+// ============================================================================
+static float    g_moon_illum01  = -1.0f;   // 0=new, 1=full
+static bool     g_moon_waxing    = true;   // true = crescente
 
-// ---------------------------------------------------------------------------
-// TEXTURE LUNA + SHADOW (precompute)
-// ---------------------------------------------------------------------------
+// (phase_idx non usato più per label, solo per texture)
+static uint8_t  g_moon_phase_idx = 0;
+
+// ============================================================================
+// TEXTURE LUNA
+// ============================================================================
 static uint16_t g_moonTex[LUNA_WIDTH * LUNA_HEIGHT];
-static bool g_moonTexReady = false;
+static bool     g_moonTexReady = false;
 
 static uint16_t g_shadowTex[LUNA_WIDTH * LUNA_HEIGHT];
-static bool g_shadowReady = false;
-static int g_shadowPhaseBucket = -1;
+static bool     g_shadowReady = false;
+static int      g_shadowPhaseBucket = -1;
 
 // ============================================================================
-// TIME & JSON UTILITY
+// TIMEZONE
 // ============================================================================
-
-static long calcTZ() {
+static inline long calcTZ() {
   time_t now = time(nullptr);
-  struct tm lo {
-  }, gm{};
+  struct tm lo{}, gm{};
   localtime_r(&now, &lo);
   gmtime_r(&now, &gm);
+
   long d = lo.tm_hour - gm.tm_hour;
   if (d > 12) d -= 24;
   if (d < -12) d += 24;
   return d;
 }
 
+// ============================================================================
+// ISO HELPERS
+// ============================================================================
 static inline void isoToHM(const String& iso, char out[6]) {
   int t = iso.indexOf('T');
   if (t < 0 || t + 5 >= iso.length()) {
     strcpy(out, "--:--");
     return;
   }
-  out[0] = iso[t + 1];
-  out[1] = iso[t + 2];
-  out[2] = ':';
-  out[3] = iso[t + 4];
-  out[4] = iso[t + 5];
-  out[5] = 0;
+  out[0]=iso[t+1]; out[1]=iso[t+2];
+  out[2]=':'; 
+  out[3]=iso[t+4]; out[4]=iso[t+5];
+  out[5]=0;
 }
 
-static bool isoToEpoch(const String& s, time_t& out) {
+static inline bool isoToEpoch(const String& s, time_t& out) {
   if (s.length() < 19) return false;
-  struct tm tt {};
-  tt.tm_year = s.substring(0, 4).toInt() - 1900;
-  tt.tm_mon = s.substring(5, 7).toInt() - 1;
-  tt.tm_mday = s.substring(8, 10).toInt();
-  tt.tm_hour = s.substring(11, 13).toInt();
-  tt.tm_min = s.substring(14, 16).toInt();
-  tt.tm_sec = s.substring(17, 19).toInt();
+
+  struct tm tt{};
+  tt.tm_year = s.substring(0,4).toInt() - 1900;
+  tt.tm_mon  = s.substring(5,7).toInt() - 1;
+  tt.tm_mday = s.substring(8,10).toInt();
+  tt.tm_hour = s.substring(11,13).toInt();
+  tt.tm_min  = s.substring(14,16).toInt();
+  tt.tm_sec  = s.substring(17,19).toInt();
+
   time_t local = mktime(&tt);
-  out = local - calcTZ() * 3600;
-  return true;
-}
-
-static bool jsonKV(const String& body, const char* key, String& out) {
-  String k = "\"";
-  k += key;
-  k += "\"";
-  int p = body.indexOf(k);
-  if (p < 0) return false;
-  p = body.indexOf('"', p + k.length());
-  if (p < 0) return false;
-  int q = body.indexOf('"', p + 1);
-  if (q < 0) return false;
-  out = body.substring(p + 1, q);
-  return true;
-}
-
-static bool jsonDailyFirstNumber(const String& body, const char* key, float& out) {
-  String k = "\"";
-  k += key;
-  k += "\":[";
-  int p = body.indexOf(k);
-  if (p < 0) return false;
-
-  p += k.length();
-  int start = -1;
-  int len = body.length();
-
-  for (int i = p; i < len; i++) {
-    char c = body[i];
-    if ((c >= '0' && c <= '9') || c == '+' || c == '-') {
-      start = i;
-      break;
-    }
-    if (c == 'n') return false;
-  }
-  if (start < 0) return false;
-
-  int end = start + 1;
-  while (end < len) {
-    char c = body[end];
-    if ((c >= '0' && c <= '9') || c == '.' || c == 'e' || c == 'E' || c == '+' || c == '-') end++;
-    else break;
-  }
-
-  out = body.substring(start, end).toFloat();
+  out = local - calcTZ()*3600;
   return true;
 }
 
 // ============================================================================
-// PHASE
-// ============================================================================
-static float calculateMoonPhaseDays(int y, int m, int d) {
-  if (m < 3) {
-    y--;
-    m += 12;
-  }
-  int A = y / 100;
-  int B = A / 4;
-  int C = 2 - A + B;
-  float E = floorf(365.25f * (y + 4716));
-  float F = floorf(30.6001f * (m + 1));
-  float jd = C + d + E + F - 1524.5f;
-  float days = jd - 2451549.5f;
-  float nm = days / 29.53f;
-  float ph = (nm - (int)nm) * 29.53f;
-  if (ph < 0) ph += 29.53f;
-  return ph;
-}
-
-// ============================================================================
-// DECODE RLE → RAM (UNA VOLTA)
+// TEXTURE BASE
 // ============================================================================
 static void ensureMoonTextureDecoded() {
   if (g_moonTexReady) return;
@@ -185,291 +135,486 @@ static void ensureMoonTextureDecoded() {
   int32_t total = LUNA_WIDTH * LUNA_HEIGHT;
   int32_t idx = 0;
 
-  for (size_t i = 0; i < LUNA_ART.runs && idx < total; i++) {
-
-    uint16_t col = LUNA_ART.data[i].color;  // FIX
-    uint16_t count = LUNA_ART.data[i].count;
-
-    for (uint16_t k = 0; k < count && idx < total; k++) {
+  for (size_t i=0; i<LUNA_ART.runs && idx<total; i++) {
+    uint16_t col = LUNA_ART.data[i].color;
+    uint16_t cnt = LUNA_ART.data[i].count;
+    for (uint16_t k=0;k<cnt && idx<total;k++)
       g_moonTex[idx++] = col;
-    }
   }
-
   g_moonTexReady = true;
 }
 
-
 // ============================================================================
-// PRECOMPUTE SHADOW (TRASPARENTE) UNA VOLTA PER FASE
+// SHADOW TEXTURE (FORMULA CORRETTA DEL TERMINATORE)
 // ============================================================================
-static void buildShadowTexture(int r) {
-  // bucket fase → 8 sezioni
-  int bucket = (int)((g_moon_phase_days / 29.53f) * 8.0f);
-  if (bucket < 0) bucket = 0;
-  if (bucket > 7) bucket = 7;
+static void buildShadowTexture(int r)
+{
+    if (g_shadowReady && g_shadowPhaseBucket == g_moon_phase_idx)
+        return;
 
-  if (bucket == g_shadowPhaseBucket) {
-    g_shadowReady = true;
-    return;
-  }
+    g_shadowPhaseBucket = g_moon_phase_idx;
+    ensureMoonTextureDecoded();
 
-  g_shadowPhaseBucket = bucket;
+    float illum = g_moon_illum01;
+    if (illum < 0) illum = 0.0f;
+    if (illum > 1) illum = 1.0f;
 
-  float illum = g_moon_illum01;
-  float phase = g_moon_phase_days;
+    // ============================================================
+    // FORMULA DEL TERMINATORE LUNARE
+    // ============================================================
+    // Il terminatore è un'ellisse. Per ogni riga y, la posizione x è:
+    //   x_terminator = k * sqrt(r² - y²)
+    // dove k = cos(π * illum):
+    //   - illum=0 (new):  k=+1  → terminatore al bordo destro → tutto buio
+    //   - illum=0.5 (quarter): k=0 → terminatore al centro → metà illuminata
+    //   - illum=1 (full): k=-1 → terminatore al bordo sinistro → tutto illuminato
+    //
+    // Waxing: lato DESTRO illuminato → lit = (x > x_terminator)
+    // Waning: lato SINISTRO illuminato → specchiamo k e usiamo lit = (x < x_terminator)
 
-  const float ALPHA = 0.35f;
-  float k = (illum * 2.0f) - 1.0f;
-  float shift = (phase < 14.765f) ? (-fabs(k) * r) : (+fabs(k) * r);
-
-  for (int y = -r; y <= r; y++) {
-
-    int y2 = y + r;
-    int row = y2 * LUNA_WIDTH;
-
-    int big2 = r * r - y * y;
-    if (big2 < 0) continue;
-
-    int xlim = (int)sqrtf(big2);
-
-    for (int x = -xlim; x <= xlim; x++) {
-
-      int px = x + r;
-      if (px < 0 || px >= LUNA_WIDTH) continue;
-
-      uint16_t base = g_moonTex[row + px];
-
-      float dx = x - shift;
-      float dist2 = dx * dx + y * y;
-
-      if (dist2 <= r * r) {
-        // blend trasparente
-        uint8_t R = (base >> 11) & 0x1F;
-        uint8_t G = (base >> 5) & 0x3F;
-        uint8_t B = base & 0x1F;
-
-        R = (uint8_t)(R * ALPHA);
-        G = (uint8_t)(G * ALPHA);
-        B = (uint8_t)(B * ALPHA);
-
-        g_shadowTex[row + px] = (R << 11) | (G << 5) | B;
-      } else {
-        g_shadowTex[row + px] = base;
-      }
+    float terminator_k = cosf(M_PI * illum);
+    
+    // Per waning, specchiamo il terminatore
+    if (!g_moon_waxing) {
+        terminator_k = -terminator_k;
     }
-  }
 
-  g_shadowReady = true;
+    for (int y = -r; y <= r; y++)
+    {
+        int row = (y + r) * LUNA_WIDTH;
+
+        int r2 = r * r;
+        int y2 = y * y;
+        if (y2 > r2) continue;
+        
+        float x_edge = sqrtf((float)(r2 - y2));  // bordo del disco a questa y
+        int xlim = (int)x_edge;
+        
+        // Posizione x del terminatore a questa altezza y
+        float x_terminator = terminator_k * x_edge;
+
+        for (int x = -xlim; x <= xlim; x++)
+        {
+            int px = x + r;
+            if (px < 0 || px >= LUNA_WIDTH) continue;
+            
+            uint16_t base = g_moonTex[row + px];
+
+            bool lit;
+            if (g_moon_waxing) {
+                // Waxing: illuminato a DESTRA del terminatore
+                lit = ((float)x > x_terminator);
+            } else {
+                // Waning: illuminato a SINISTRA del terminatore
+                lit = ((float)x < x_terminator);
+            }
+
+            if (!lit) {
+                // Zona in ombra: oscura
+                uint8_t R = ((base >> 11) & 0x1F) >> 2;
+                uint8_t G = ((base >> 5)  & 0x3F) >> 2;
+                uint8_t B = ( base        & 0x1F) >> 2;
+                g_shadowTex[row + px] = (R<<11)|(G<<5)|B;
+            } else {
+                // Zona illuminata
+                g_shadowTex[row + px] = base;
+            }
+        }
+    }
+
+    g_shadowReady = true;
 }
 
 // ============================================================================
-// Fetch SUN + MOON
+// ICS PARSER (4 fasi → prev,next)
+// ============================================================================
+struct MoonEvent {
+  time_t ts;
+  uint8_t phase4; // 0=new,1=first,2=full,3=last
+  bool valid;
+};
+
+static uint8_t uidToPhase4(const String& uid) {
+  if (uid.indexOf("newmoon")>=0)         return 0;
+  if (uid.indexOf("first-quarter")>=0)   return 1;
+  if (uid.indexOf("fullmoon")>=0)        return 2;
+  if (uid.indexOf("last-quarter")>=0)    return 3;
+  return 255;
+}
+
+static time_t parseDate(const String& line) {
+  int p=line.indexOf(':');
+  if (p<0) return 0;
+
+  String d=line.substring(p+1);
+  String y=d.substring(0,4);
+  String m=d.substring(4,6);
+  String dd=d.substring(6,8);
+
+  struct tm tt{};
+  tt.tm_year=y.toInt()-1900;
+  tt.tm_mon =m.toInt()-1;
+  tt.tm_mday=dd.toInt();
+  tt.tm_hour=12;
+  tt.tm_min=0;
+  tt.tm_sec=0;
+
+  return timegm_esp32(&tt);
+}
+
+// ============================================================================
+// Interpolazione illuminazione (corretta)
+// ============================================================================
+static void interpolatePhase(const MoonEvent& prev, const MoonEvent& next, time_t nowUTC) {
+  if (!prev.valid || !next.valid) {
+    g_moon_illum01=-1;
+    g_moon_phase_idx=0;
+    g_moon_waxing=true;
+    return;
+  }
+
+  double total = difftime(next.ts, prev.ts);
+  if (total <= 0) {
+    g_moon_illum01=-1;
+    g_moon_phase_idx=0;
+    g_moon_waxing=true;
+    return;
+  }
+
+  double pos=difftime(nowUTC, prev.ts)/total;
+  if (pos<0) pos=0;
+  if (pos>1) pos=1;
+
+  // da 4 fasi → 8 indici per texture (NON label)
+  uint8_t p0=prev.phase4*2;
+  uint8_t p1=next.phase4*2;
+  if (p1<=p0) p1+=8;
+
+  float pf=p0 + pos*(p1-p0);
+  g_moon_phase_idx = ((uint8_t)roundf(pf)) % 8;
+
+  // Determina se siamo in fase crescente o calante
+  // 0=new, 1=first quarter, 2=full, 3=last quarter
+  if (prev.phase4 == 0 && next.phase4 == 1) {
+    // new → first quarter: CRESCENTE
+    g_moon_waxing = true;
+    g_moon_illum01 = pos * 0.5f; // da 0 a 0.5
+  }
+  else if (prev.phase4 == 1 && next.phase4 == 2) {
+    // first quarter → full: CRESCENTE
+    g_moon_waxing = true;
+    g_moon_illum01 = 0.5f + (pos * 0.5f); // da 0.5 a 1.0
+  }
+  else if (prev.phase4 == 2 && next.phase4 == 3) {
+    // full → last quarter: CALANTE
+    g_moon_waxing = false;
+    g_moon_illum01 = 1.0f - (pos * 0.5f); // da 1.0 a 0.5
+  }
+  else if (prev.phase4 == 3 && next.phase4 == 0) {
+    // last quarter → new: CALANTE
+    g_moon_waxing = false;
+    g_moon_illum01 = 0.5f - (pos * 0.5f); // da 0.5 a 0
+  }
+  else if (prev.phase4 == 3 && next.phase4 == 1) {
+    // last quarter → first (crossing new moon): CRESCENTE dopo new
+    g_moon_waxing = (pos > 0.5f);
+    if (pos < 0.5f) {
+      // calante verso new
+      g_moon_illum01 = 0.5f - (pos * 1.0f); // da 0.5 a 0
+    } else {
+      // crescente da new
+      g_moon_illum01 = (pos - 0.5f) * 1.0f; // da 0 a 0.5
+    }
+  }
+  else if (prev.phase4 == 1 && next.phase4 == 3) {
+    // first quarter → last (crossing full moon): prima CRESCENTE poi CALANTE
+    g_moon_waxing = (pos < 0.5f);
+    if (pos < 0.5f) {
+      // crescente verso full
+      g_moon_illum01 = 0.5f + (pos * 1.0f); // da 0.5 a 1.0
+    } else {
+      // calante da full
+      g_moon_illum01 = 1.0f - ((pos - 0.5f) * 1.0f); // da 1.0 a 0.5
+    }
+  }
+  else {
+    // Fallback generico (non dovrebbe accadere con dati corretti)
+    float illumPrev = (prev.phase4==0?0 : prev.phase4==2?1 : 0.5);
+    float illumNext = (next.phase4==0?0 : next.phase4==2?1 : 0.5);
+    g_moon_illum01 = illumPrev + pos*(illumNext-illumPrev);
+    g_moon_waxing = (illumNext > illumPrev);
+  }
+}
+
+// ============================================================================
+// FETCH SUN + MOON
 // ============================================================================
 bool fetchSun() {
-  strcpy(sun_rise, "--:--");
-  strcpy(sun_set, "--:--");
-  strcpy(sun_noon, "--:--");
-  strcpy(sun_cb, "--:--");
-  strcpy(sun_ce, "--:--");
-  strcpy(sun_len, "--h --m");
-  strcpy(sun_uvi, "--");
 
-  g_moon_phase_days = -1;
-  g_moon_illum01 = -1;
-  g_moon_phase_idx = 0;
-  g_moon_waxing = true;
+  strcpy(sun_rise,"--:--");
+  strcpy(sun_set,"--:--");
+  strcpy(sun_noon,"--:--");
+  strcpy(sun_cb,"--:--");
+  strcpy(sun_ce,"--:--");
+  strcpy(sun_len,"--h --m");
+  strcpy(sun_uvi,"--");
 
-  if (g_lat.isEmpty() || g_lon.isEmpty()) return false;
+  g_moon_illum01=-1;
+  g_moon_phase_idx=0;
+  g_moon_waxing=true;
 
-  time_t now = time(nullptr);
-  struct tm t {};
-  localtime_r(&now, &t);
+  // 1) Geocoding
+  float lat, lon;
+  if (!fetchLatLon(lat, lon))
+    return false;
 
-  // --- SUN ---
-  String body;
-  String url = "https://api.sunrise-sunset.org/json?lat=" + g_lat + "&lng=" + g_lon + "&formatted=0";
-  if (!httpGET(url, body, 10000)) return false;
+  g_lat=String(lat,6);
+  g_lon=String(lon,6);
 
-  String sr, ss, sn, cb, ce;
-  if (!jsonKV(body, "sunrise", sr)) return false;
-  if (!jsonKV(body, "sunset", ss)) return false;
+  // 2) SUN
+  {
+    String body;
+    String url =
+      "https://api.sunrise-sunset.org/json?lat="+g_lat+
+      "&lng="+g_lon+"&formatted=0";
 
-  jsonKV(body, "solar_noon", sn);
-  jsonKV(body, "civil_twilight_begin", cb);
-  jsonKV(body, "civil_twilight_end", ce);
+    if (!httpGET(url, body, 10000)) return false;
 
-  isoToHM(sr, sun_rise);
-  isoToHM(ss, sun_set);
-  isoToHM(sn, sun_noon);
-  isoToHM(cb, sun_cb);
-  isoToHM(ce, sun_ce);
+    String sr,ss,sn,cb,ce;
+    if (!jsonKV(body,"sunrise",sr)) return false;
+    if (!jsonKV(body,"sunset", ss)) return false;
 
-  time_t a, b;
-  if (isoToEpoch(sr, a) && isoToEpoch(ss, b) && b > a) {
-    long d = b - a;
-    snprintf(sun_len, sizeof(sun_len), "%02ldh %02ldm", d / 3600, (d % 3600) / 60);
+    jsonKV(body,"solar_noon",sn);
+    jsonKV(body,"civil_twilight_begin",cb);
+    jsonKV(body,"civil_twilight_end",ce);
+
+    isoToHM(sr, sun_rise);
+    isoToHM(ss, sun_set);
+    isoToHM(sn, sun_noon);
+    isoToHM(cb, sun_cb);
+    isoToHM(ce, sun_ce);
+
+    time_t a,b;
+    if (isoToEpoch(sr,a) && isoToEpoch(ss,b) && b>a) {
+      long d=b-a;
+      snprintf(sun_len,sizeof(sun_len),"%02ldh %02ldm", d/3600,(d%3600)/60);
+    }
   }
 
-  // --- UV ---
-  String bodyUV;
-  String urlUV = String("https://api.open-meteo.com/v1/forecast") + "?latitude=" + g_lat + "&longitude=" + g_lon + "&timezone=auto&daily=uv_index_max&forecast_days=1";
+  // 3) UV
+  {
+    String bodyUV;
+    String urlUV =
+      String("https://api.open-meteo.com/v1/forecast") +
+      "?latitude="+g_lat+
+      "&longitude="+g_lon+
+      "&timezone=auto&daily=uv_index_max&forecast_days=1";
 
-  if (httpGET(urlUV, bodyUV, 8000)) {
-    float uvi = -1;
-    if (jsonDailyFirstNumber(bodyUV, "uv_index_max", uvi) && uvi >= 0)
-      snprintf(sun_uvi, sizeof(sun_uvi), "%.1f", uvi);
+    if (httpGET(urlUV, bodyUV, 8000)) {
+      float uvi=-1;
+      if (jsonDailyFirstNumber(bodyUV,"uv_index_max",uvi) && uvi>=0)
+        snprintf(sun_uvi,sizeof(sun_uvi),"%.1f",uvi);
+    }
   }
 
-  // --- MOON ---
-  g_moon_phase_days = calculateMoonPhaseDays(
-    t.tm_year + 1900, t.tm_mon + 1, t.tm_mday);
+  // 4) MOON (ICS)
+  {
+    String bodyICS;
 
-  g_moon_phase_idx = (uint8_t)((g_moon_phase_days / 29.53f) * 8.0f) % 8;
+    String urlICS =
+      "https://mooncal.ch/mooncal.ics?created=1&lang=en"
+      "&phases[full]=true&phases[new]=true&phases[quarter]=true"
+      "&phases[daily]=false&style=fullmoon"
+      "&events[lunareclipse]=false&events[solareclipse]=false&events[moonlanding]=false"
+      "&before=P45D&after=P45D&zone=Europe/Zurich";
 
-  g_moon_illum01 = (1.0f - cosf((g_moon_phase_days / 29.53f) * 2.0f * PI)) * 0.5f;
+    if (httpGET(urlICS, bodyICS, 12000)) {
 
-  g_moon_waxing = (g_moon_phase_days < 14.765f);
+      MoonEvent prev{0,0,false};
+      MoonEvent next{0,0,false};
 
-  // invalida ombra, verrà rigenerata
-  g_shadowReady = false;
+      time_t nowUTC = time(nullptr) - calcTZ()*3600;
 
+      int pos=0;
+      while (true) {
+        int evStart=bodyICS.indexOf("BEGIN:VEVENT", pos);
+        if (evStart<0) break;
+
+        int evEnd=bodyICS.indexOf("END:VEVENT", evStart);
+        if (evEnd<0) break;
+
+        String ev=bodyICS.substring(evStart, evEnd);
+
+        int pdt=ev.indexOf("DTSTART");
+        if (pdt<0) {pos=evEnd; continue;}
+        int ln=ev.indexOf('\n', pdt);
+        if (ln<0) ln=ev.length();
+        String dtline=ev.substring(pdt, ln);
+
+        time_t ts=parseDate(dtline);
+
+        int pu=ev.indexOf("UID:");
+        if (pu<0) {pos=evEnd; continue;}
+        int eu=ev.indexOf('\n', pu);
+        if (eu<0) eu=ev.length();
+        String uid=ev.substring(pu, eu);
+
+        uint8_t ph4=uidToPhase4(uid);
+        if (ph4==255) {pos=evEnd; continue;}
+
+        if (ts <= nowUTC) {
+          prev.ts=ts;
+          prev.phase4=ph4;
+          prev.valid=true;
+        } else {
+          next.ts=ts;
+          next.phase4=ph4;
+          next.valid=true;
+          break;
+        }
+
+        pos=evEnd;
+      }
+
+      interpolatePhase(prev, next, nowUTC);
+    }
+  }
+
+  g_shadowReady=false;
   return true;
 }
 
 // ============================================================================
-// Riga di testo sole
+// UI helpers
 // ============================================================================
-static inline void sunRow(const char* label, const char* val, int& y) {
-  const int SZ = TEXT_SCALE + 1;
-  const int H = BASE_CHAR_H * SZ + 8;
+static inline void sunRow(const char* label,const char* val,int& y) {
+  const int SZ=TEXT_SCALE+1;
+  const int H=BASE_CHAR_H*SZ+8;
 
   gfx->setTextSize(SZ);
   gfx->setTextColor(COL_ACCENT1);
-  gfx->setCursor(PAGE_X, y);
+  gfx->setCursor(PAGE_X,y);
   gfx->print(label);
 
   gfx->setTextColor(COL_ACCENT2);
-
-  int w = strlen(val) * BASE_CHAR_W * SZ;
-  int x = gfx->width() - PAGE_X - w;
-  if (x < PAGE_X) x = PAGE_X;
-
-  gfx->setCursor(x, y);
+  int w=strlen(val)*BASE_CHAR_W*SZ;
+  int x=gfx->width()-PAGE_X-w;
+  if (x<PAGE_X) x=PAGE_X;
+  gfx->setCursor(x,y);
   gfx->print(val);
 
-  y += H;
+  y+=H;
 }
 
 // ============================================================================
-// Etichetta fase lunare
+// LABEL LUNA (basata su illuminazione vera + waxing) - CORRETTA
 // ============================================================================
 static void buildMoonPhaseLabel(bool it, char out[32]) {
+
   if (g_moon_illum01 < 0) {
-    strcpy(out, it ? "Luna --" : "Moon --");
+    strcpy(out, it ? "Dati non disponibili" : "No data");
     return;
   }
 
-  static const char* en[8] = {
-    "New moon", "Waxing crescent", "First quarter", "Waxing gibbous",
-    "Full moon", "Waning gibbous", "Last quarter", "Waning crescent"
-  };
+  float illum = g_moon_illum01;
+  bool w = g_moon_waxing;
 
-  static const char* itn[8] = {
-    "Luna nuova", "Falce crescente", "Primo quarto", "Gibbosa crescente",
-    "Luna piena", "Gibbosa calante", "Ultimo quarto", "Falce calante"
-  };
+  const char *en, *itn;
 
-  uint8_t idx = g_moon_phase_idx;
-  if (idx > 7) idx = 7;
-  snprintf(out, 32, "%s", it ? itn[idx] : en[idx]);
+  // Soglie corrette per le 8 fasi lunari:
+  // 0-3%:     New Moon
+  // 3-47%:    Crescent (falce)
+  // 47-53%:   Quarter (primo/ultimo quarto)
+  // 53-97%:   Gibbous (gibbosa)
+  // 97-100%:  Full Moon
+
+  if (illum < 0.03f) {
+    en = "New Moon"; 
+    itn = "Luna nuova";
+  }
+  else if (illum < 0.47f) {
+    en = w ? "Waxing Crescent" : "Waning Crescent";
+    itn = w ? "Falce crescente" : "Falce calante";
+  }
+  else if (illum < 0.53f) {
+    en = w ? "First Quarter" : "Last Quarter";
+    itn = w ? "Primo quarto" : "Ultimo quarto";
+  }
+  else if (illum < 0.97f) {
+    en = w ? "Waxing Gibbous" : "Waning Gibbous";
+    itn = w ? "Gibbosa crescente" : "Gibbosa calante";
+  }
+  else {
+    en = "Full Moon"; 
+    itn = "Luna piena";
+  }
+
+  strcpy(out, it ? itn : en);
 }
 
 // ============================================================================
-// Disegno luna con ombra TRASPARENTE precompute
+// DRAW LUNA
 // ============================================================================
-static void drawMoonPhaseGraphic(int16_t cx, int16_t cy, int16_t r) {
+static void drawMoonPhaseGraphic(int16_t cx,int16_t cy,int16_t r) {
   if (g_moon_illum01 < 0) return;
 
   ensureMoonTextureDecoded();
-  buildShadowTexture(r);  // solo se cambia fase
+  buildShadowTexture(r);
 
-  // copia RAM → schermo
-  for (int y = -r; y <= r; y++) {
-    int big2 = r * r - y * y;
+  for (int y=-r; y<=r; y++) {
+    int big2=r*r - y*y;
     if (big2 < 0) continue;
+    int xlim=(int)sqrtf(big2);
+    int row=(y+r)*LUNA_WIDTH;
 
-    int xlim = (int)sqrtf(big2);
-
-    int row = (y + r) * LUNA_WIDTH;
-
-    for (int x = -xlim; x <= xlim; x++) {
-      int px = x + r;
-      if (px < 0 || px >= LUNA_WIDTH) continue;
-
-      uint16_t col = g_shadowTex[row + px];
-
-      gfx->drawPixel(cx + x, cy + y, col);
+    for (int x=-xlim; x<=xlim; x++) {
+      int px=x+r;
+      if (px<0||px>=LUNA_WIDTH) continue;
+      gfx->drawPixel(cx+x, cy+y, g_shadowTex[row+px]);
     }
   }
 
-  gfx->drawCircle(cx, cy, r, 0x0000);
+  gfx->drawCircle(cx,cy,r,0x0000);
 }
 
 // ============================================================================
-// Page SUN
+// PAGINA SUN
 // ============================================================================
 void pageSun() {
-  const bool it = (g_lang == "it");
+  const bool it = (g_lang=="it");
+
   gfx->fillScreen(0x0000);
+  drawHeader(it?"Ore di luce oggi":"Today's daylight");
 
-  drawHeader(it ? "Ore di luce oggi" : "Today's daylight");
+  int y=PAGE_Y+20;
 
-  int y = PAGE_Y + 20;
-
-  if (sun_rise[0] == '-') {
-    drawBoldMain(PAGE_X, y, it ? "Nessun dato disponibile" : "No data available", TEXT_SCALE);
+  if (sun_rise[0]=='-') {
+    drawBoldMain(PAGE_X,y, it?"Nessun dato disponibile":"No data available", TEXT_SCALE);
     return;
   }
 
-  sunRow(it ? "Alba" : "Sunrise", sun_rise, y);
-  sunRow(it ? "Tramonto" : "Sunset", sun_set, y);
-  sunRow(it ? "Mezzogiorno" : "Solar noon", sun_noon, y);
-  sunRow(it ? "Durata luce" : "Day length", sun_len, y);
-  sunRow(it ? "Civile inizio" : "Civil begin", sun_cb, y);
-  sunRow(it ? "Civile fine" : "Civil end", sun_ce, y);
-  sunRow(it ? "Indice UV" : "UV index", sun_uvi, y);
+  sunRow(it?"Alba":"Sunrise",sun_rise,y);
+  sunRow(it?"Tramonto":"Sunset",sun_set,y);
+  sunRow(it?"Mezzogiorno":"Solar noon",sun_noon,y);
+  sunRow(it?"Durata luce":"Day length",sun_len,y);
+  sunRow(it?"Civile inizio":"Civil begin",sun_cb,y);
+  sunRow(it?"Civile fine":"Civil end",sun_ce,y);
+  sunRow(it?"Indice UV":"UV index",sun_uvi,y);
 
   char label[32];
-  buildMoonPhaseLabel(it, label);
+  buildMoonPhaseLabel(it,label);
 
-  // --- Label fase lunare su due righe ---
   gfx->setTextSize(TEXT_SCALE);
   gfx->setTextColor(COL_TEXT);
 
-  // spezza al primo spazio
-  char* spacePtr = strchr(label, ' ');
-  if (spacePtr) {
-    *spacePtr = 0;  // chiude la prima parola
-    const char* w1 = label;
-    const char* w2 = spacePtr + 1;
+  gfx->setCursor(PAGE_X, y+10);
+  gfx->print(label);
 
-    gfx->setCursor(PAGE_X, y + 10);
-    gfx->print(w1);
+  const int16_t r=85;
+  const int16_t margin=30;
 
-    gfx->setCursor(PAGE_X, y + 4 + BASE_CHAR_H * TEXT_SCALE + 4);
-    gfx->print(w2);
-  } else {
-    // fallback: una sola parola
-    gfx->setCursor(PAGE_X, y + 10);
-    gfx->print(label);
-  }
+  int16_t cx=gfx->width()/2 + 70;
+  int16_t cy=gfx->height() - margin - r;
 
-
-  const int16_t r = 85;
-  const int16_t margin = 30;
-
-  int16_t cx = gfx->width() / 2 + 70;
-  int16_t cy = gfx->height() - margin - r;
-
-  drawMoonPhaseGraphic(cx, cy, r);
+  drawMoonPhaseGraphic(cx,cy,r);
 }

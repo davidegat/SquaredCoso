@@ -10,6 +10,7 @@
 #include <Arduino.h>
 #include <Arduino_GFX_Library.h>
 #include "../handlers/globals.h"
+#include "../handlers/jsonhelpers.h"
 
 // ---------------------------------------------------------------------------
 // EXTERN dal core (display, layout, colori, helpers HTTP / geo)
@@ -33,7 +34,7 @@ extern void drawHeader(const String& title);
 extern void drawBoldMain(int16_t x, int16_t y, const String& raw);
 extern void drawBoldMain(int16_t x, int16_t y, const String& raw, uint8_t scale);
 
-extern int  indexOfCI(const String&, const String&, int from);
+extern int indexOfCI(const String&, const String&, int from);
 extern bool httpGET(const String& url, String& out, uint32_t timeout);
 extern bool geocodeIfNeeded();
 
@@ -49,8 +50,8 @@ static float t24[24] = { NAN };
 // ---------------------------------------------------------------------------
 // Stub animazione (API compatibile, ma disattivata)
 // ---------------------------------------------------------------------------
-static int      temp24_progress = 23;
-static uint32_t temp24_last     = 0;
+static int temp24_progress = 23;
+static uint32_t temp24_last = 0;
 
 void resetTemp24Anim() {
   temp24_progress = 23;
@@ -60,25 +61,6 @@ void tickTemp24Anim() {
   (void)temp24_last;  // animazione disattivata, manteniamo la firma
 }
 
-// ---------------------------------------------------------------------------
-// Ricerca della ']' che chiude la '[' a partire da start (con annidamento)
-// ---------------------------------------------------------------------------
-static int findMatchingBracket(const String& src, int start) {
-  const int N = src.length();
-  if (start < 0 || start >= N || src[start] != '[')
-    return -1;
-
-  int depth = 0;
-  for (int i = start; i < N; i++) {
-    char c = src[i];
-    if (c == '[') depth++;
-    else if (c == ']') {
-      depth--;
-      if (depth == 0) return i;
-    }
-  }
-  return -1;
-}
 
 // ---------------------------------------------------------------------------
 // Fetch da Open-Meteo: 7 valori giornalieri → 24 campioni interpolati
@@ -91,10 +73,9 @@ static bool fetchTemp24() {
 
   String url =
     "https://api.open-meteo.com/v1/forecast?"
-    "latitude="   + g_lat +
-    "&longitude=" + g_lon +
-    "&daily=temperature_2m_mean"
-    "&forecast_days=7&timezone=auto";
+    "latitude="
+    + g_lat + "&longitude=" + g_lon + "&daily=temperature_2m_mean"
+                                      "&forecast_days=7&timezone=auto";
 
   String body;
   if (!httpGET(url, body, 12000))
@@ -117,21 +98,19 @@ static bool fetchTemp24() {
   float seven[7];
   for (int i = 0; i < 7; i++) seven[i] = NAN;
 
-  int   idx   = 0;
-  int   start = 0;
+  int idx = 0;
+  int start = 0;
   const int L = arr.length();
 
   while (idx < 7 && start < L) {
 
     int s = start;
-    while (s < L &&
-           !((arr[s] >= '0' && arr[s] <= '9') || arr[s] == '-'))
+    while (s < L && !((arr[s] >= '0' && arr[s] <= '9') || arr[s] == '-'))
       s++;
     if (s >= L) break;
 
     int e = s;
-    while (e < L &&
-           ((arr[e] >= '0' && arr[e] <= '9') || arr[e] == '.' || arr[e] == '-'))
+    while (e < L && ((arr[e] >= '0' && arr[e] <= '9') || arr[e] == '.' || arr[e] == '-'))
       e++;
 
     seven[idx] = arr.substring(s, e).toFloat();
@@ -153,8 +132,8 @@ static bool fetchTemp24() {
 
   // interpolazione lineare tra anchor consecutivi
   for (int a = 0; a < 6; a++) {
-    int   x1 = anchors[a];
-    int   x2 = anchors[a + 1];
+    int x1 = anchors[a];
+    int x2 = anchors[a + 1];
     float y1 = seven[a];
     float y2 = seven[a + 1];
 
@@ -177,8 +156,7 @@ static void pageTemp24() {
 
   drawHeader(
     g_lang == "it" ? "Evoluzione temperatura"
-                   : "Temperature trend"
-  );
+                   : "Temperature trend");
 
   float mn = 9999.0f;
   float mx = -9999.0f;
@@ -197,10 +175,13 @@ static void pageTemp24() {
       PAGE_Y + CHAR_H,
       (g_lang == "it" ? "Dati non disponibili"
                       : "Data not available"),
-      TEXT_SCALE
-    );
+      TEXT_SCALE);
     return;
   }
+
+  // range VA CALCOLATO QUI, PRIMA DI USARLO PER LE ETICHETTE
+  float range = mx - mn;
+  if (range < 0.1f) range = 0.1f;
 
   const int X = 20;
   const int W = 440;
@@ -209,59 +190,99 @@ static void pageTemp24() {
 
   gfx->fillRect(X - 2, Y - 2, W + 4, H + 60, COL_BG);
   gfx->drawRect(X, Y, W, H, COL_ACCENT2);
-// -----------------------------------------------------------
-// Etichette dei 7 giorni reali (IT/EN), basate sulla data locale
-// -----------------------------------------------------------
-{
-  // Giorni della settimana
-  const char* days_it[7] = {
-    "Lun", "Mar", "Mer", "Gio", "Ven", "Sab", "Dom"
-  };
-  const char* days_en[7] = {
-    "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"
-  };
 
-  // Scegli lingua
-  const char** D = (g_lang == "it" ? days_it : days_en);
-
-  // Calcola indice del giorno corrente
-  time_t now = time(nullptr);
-  struct tm info;
-  localtime_r(&now, &info);
-
-  // tm_wday: 0=Dom, 1=Lun,... 6=Sab
-  // mappo 0=Dom → indice 6, 1=Lun → 0, ecc.
-  int base = (info.tm_wday == 0 ? 6 : info.tm_wday - 1);
-
-  // Anchor orizzontali
-  const int anchors[7] = { 0, 4, 8, 12, 16, 20, 23 };
-
-  gfx->setTextColor(COL_ACCENT2, COL_BG);
-  gfx->setTextSize(1);
-
-  for (int i = 0; i < 7; i++) {
-    int dayIndex = (base + i) % 7;
-
-    // coordinate X per singolo giorno
-    int xx = X + (anchors[i] * W) / 23;
-
-    gfx->setCursor(xx - 10, Y + H + 48);
-    gfx->print(D[dayIndex]);
+  // -----------------------------------------------------------
+  // GRID: linee verticali per i 7 giorni (ancore 0–23)
+  // -----------------------------------------------------------
+  {
+    const int anchors[7] = { 0, 4, 8, 12, 16, 20, 23 };
+    gfx->startWrite();
+    for (int i = 0; i < 7; i++) {
+      int xx = X + (anchors[i] * W) / 23;
+      gfx->drawLine(xx, Y, xx, Y + H, COL_ACCENT2);
+    }
+    gfx->endWrite();
   }
 
-  // Ripristino lo scale standard della pagina
-  gfx->setTextSize(TEXT_SCALE);
-}
+  // -----------------------------------------------------------
+  // Etichette temperatura min/max + livelli intermedi
+  // -----------------------------------------------------------
+  {
+    gfx->setTextSize(2);
+    gfx->setTextColor(COL_TEXT, COL_BG);
 
-//  String legend =
-//    (g_lang == "it"
-//       ? String((int)mn) + " min - " + String((int)mx) + " max"
-//       : String((int)mn) + " low - " + String((int)mx) + " high");
+    // Etichetta MIN
+    String tMin = String((int)mn) + "c";
+    gfx->setCursor(X - 40, Y + H - 10);
+    gfx->print(tMin);
 
-//  drawBoldMain(PAGE_X, Y + H + 20, legend, TEXT_SCALE + 1);
+    // Etichetta MAX
+    String tMax = String((int)mx) + "c";
+    gfx->setCursor(X - 40, Y - 4);
+    gfx->print(tMax);
 
-  float range = mx - mn;
-  if (range < 0.1f) range = 0.1f;
+    // Tre livelli intermedi (25%, 50%, 75%)
+    float y25 = Y + H - (H * 0.25f);
+    float y50 = Y + H - (H * 0.50f);
+    float y75 = Y + H - (H * 0.75f);
+
+    int mid25 = (int)(mn + range * 0.25f);
+    int mid50 = (int)(mn + range * 0.50f);
+    int mid75 = (int)(mn + range * 0.75f);
+
+    gfx->setCursor(X - 40, (int)(y25 - 6));
+    gfx->print(String(mid25) + "c");
+
+    gfx->setCursor(X - 40, (int)(y50 - 6));
+    gfx->print(String(mid50) + "c");
+
+    gfx->setCursor(X - 40, (int)(y75 - 6));
+    gfx->print(String(mid75) + "c");
+  }
+
+  // -----------------------------------------------------------
+  // Etichette dei 7 giorni reali (IT/EN), basate sulla data locale
+  // -----------------------------------------------------------
+  {
+    const char* days_it[7] = {
+      "Lun", "Mar", "Mer", "Gio", "Ven", "Sab", "Dom"
+    };
+    const char* days_en[7] = {
+      "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"
+    };
+
+    const char** D = (g_lang == "it" ? days_it : days_en);
+
+    time_t now = time(nullptr);
+    struct tm info;
+    localtime_r(&now, &info);
+
+    int base = (info.tm_wday == 0 ? 6 : info.tm_wday - 1);
+
+    const int anchors[7] = { 0, 4, 8, 12, 16, 20, 23 };
+
+    gfx->setTextColor(COL_ACCENT2, COL_BG);
+    gfx->setTextSize(1);
+
+    for (int i = 0; i < 7; i++) {
+      int dayIndex = (base + i) % 7;
+      int xx = X + (anchors[i] * W) / 23;
+
+      gfx->setCursor(xx - 10, Y + H + 48);
+      gfx->print(D[dayIndex]);
+    }
+
+    gfx->setTextSize(TEXT_SCALE);
+  }
+
+  // LEGEND vecchia commentata: inutile ora
+  // String legend =
+  //   (g_lang == "it"
+  //      ? String((int)mn) + " min - " + String((int)mx) + " max"
+  //      : String((int)mn) + " low - " + String((int)mx) + " high");
+  // drawBoldMain(PAGE_X, Y + H + 20, legend, TEXT_SCALE + 1);
+
+  // range è già stato calcolato sopra
 
   for (int i = 0; i < 23; i++) {
 
@@ -269,8 +290,8 @@ static void pageTemp24() {
     float v2 = t24[i + 1];
     if (isnan(v1) || isnan(v2)) continue;
 
-    int x1 = X + (i      * W) / 23;
-    int x2 = X + ((i+1)  * W) / 23;
+    int x1 = X + (i * W) / 23;
+    int x2 = X + ((i + 1) * W) / 23;
 
     int y1 = Y + H - (int)(((v1 - mn) / range) * H);
     int y2 = Y + H - (int)(((v2 - mn) / range) * H);
@@ -278,4 +299,4 @@ static void pageTemp24() {
     gfx->drawLine(x1, y1, x2, y2, COL_ACCENT1);
   }
 }
-
+	

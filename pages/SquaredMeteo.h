@@ -43,60 +43,6 @@ static String w_now_desc;
 static String w_desc[3];
 
 // ----------------------------------------------------
-// estrazione semplice numerica "key": 12.3
-// (con parametro "from" per limitare il blocco)
-// ----------------------------------------------------
-static bool extractJsonNumber(const String& body,
-                              const String& key,
-                              float &out,
-                              int from = 0)
-{
-  int p = body.indexOf(key, from);
-  if (p < 0) return false;
-
-  p = body.indexOf(":", p);
-  if (p < 0) return false;
-
-  int s = p + 1;
-  while (s < (int)body.length() && (body[s]==' ' || body[s]=='\"'))
-    s++;
-
-  int e = s;
-  while (e < (int)body.length() &&
-        (isdigit(body[e]) || body[e]=='-' || body[e]=='+' || body[e]=='.'))
-    e++;
-
-  if (e <= s) return false;
-
-  out = body.substring(s, e).toFloat();
-  return true;
-}
-
-// ----------------------------------------------------
-// estrazione stringa "key": "value"
-// (non usata per ora, ma la teniamo)
-// ----------------------------------------------------
-static bool extractJsonString2(const String& body, const String& key, String &out)
-{
-  int p = body.indexOf(key);
-  if (p < 0) return false;
-
-  p = body.indexOf(":", p);
-  if (p < 0) return false;
-
-  int s = body.indexOf("\"", p);
-  if (s < 0) return false;
-  s++;
-
-  int e = body.indexOf("\"", s);
-  if (e < 0) return false;
-
-  out = body.substring(s, e);
-  out.trim();
-  return out.length() > 0;
-}
-
-// ----------------------------------------------------
 // Geocoding → lat/lon (Open-Meteo geocoding API)
 // ----------------------------------------------------
 static bool fetchLatLon(float &lat, float &lon)
@@ -312,6 +258,8 @@ constexpr uint16_t dustCol[3] = {
 };
 
 // zone protette dalla UI: header, testo, linee, temp, icona
+// fa schifo ma per ora funziona
+
 static inline bool isUI(int x, int y) {
   if (y < PAGE_Y + 58) return true;
 
@@ -510,7 +458,7 @@ void pageWeather() {
   if (!isnan(w_now_tempC)) {
     gfx->setTextColor(COL_ACCENT1, COL_BG);
     gfx->setTextSize(9);
-    gfx->setCursor(PAD, 480 - 90);
+    gfx->setCursor(PAD, 480 - 115);
     gfx->print((int)round(w_now_tempC));
     gfx->print("c");
     gfx->setTextSize(2);

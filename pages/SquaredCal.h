@@ -9,16 +9,18 @@
 // - Nessuna String persistente nei dati: solo char[] + time_t in cal[]
 // ---------------------------------------------------------------------------
 
+#include "../images/cal_icon.h"
+
 // configurazione globale e helper forniti dal core di SquaredCoso
 extern String g_lang;
 extern String g_ics;
 
-extern void   todayYMD(String& ymd);
-extern bool   httpGET(const String& url, String& body, uint32_t timeoutMs);
-extern int    indexOfCI(const String& src, const String& key, int from);
+extern void todayYMD(String& ymd);
+extern bool httpGET(const String& url, String& body, uint32_t timeoutMs);
+extern int indexOfCI(const String& src, const String& key, int from);
 
-extern void   drawHeader(const String& title);
-extern void   drawBoldMain(int16_t x, int16_t y, const String& raw, uint8_t scale);
+extern void drawHeader(const String& title);
+extern void drawBoldMain(int16_t x, int16_t y, const String& raw, uint8_t scale);
 extern String sanitizeText(const String& in);
 
 extern Arduino_RGB_Display* gfx;
@@ -37,11 +39,11 @@ extern void drawHLine(int y);
 // Struttura evento ICS compatta (nessuna alloc dinamica)
 // ---------------------------------------------------------------------------
 struct CalItem {
-  char   when[16];
-  char   summary[64];
+  char when[16];
+  char summary[64];
   time_t ts;
-  bool   allDay;
-  bool   used;
+  bool allDay;
+  bool used;
 };
 
 static CalItem cal[3];
@@ -51,11 +53,11 @@ static CalItem cal[3];
 // ---------------------------------------------------------------------------
 static inline void resetCal() {
   for (uint8_t i = 0; i < 3; i++) {
-    cal[i].when[0]    = '\0';
+    cal[i].when[0] = '\0';
     cal[i].summary[0] = '\0';
-    cal[i].ts         = 0;
-    cal[i].allDay     = false;
-    cal[i].used       = false;
+    cal[i].ts = 0;
+    cal[i].allDay = false;
+    cal[i].used = false;
   }
 }
 
@@ -134,7 +136,10 @@ bool fetchICS() {
     String blk = body.substring(b, e);
 
     int ds = indexOfCI(blk, "DTSTART", 0);
-    if (ds < 0) { p = e + 10; continue; }
+    if (ds < 0) {
+      p = e + 10;
+      continue;
+    }
 
     String rawStart = extractAfterColon(blk, ds);
     if (!isTodayStamp(rawStart, today)) {
@@ -144,7 +149,10 @@ bool fetchICS() {
 
     int ss = indexOfCI(blk, "SUMMARY", 0);
     String summary = (ss >= 0) ? extractAfterColon(blk, ss) : "";
-    if (!summary.length()) { p = e + 10; continue; }
+    if (!summary.length()) {
+      p = e + 10;
+      continue;
+    }
 
     String whenStr;
     humanTimeFromStamp(rawStart, whenStr);
@@ -155,24 +163,24 @@ bool fetchICS() {
     struct tm tt = {};
     if (rawStart.length() >= 8) {
       tt.tm_year = rawStart.substring(0, 4).toInt() - 1900;
-      tt.tm_mon  = rawStart.substring(4, 6).toInt() - 1;
+      tt.tm_mon = rawStart.substring(4, 6).toInt() - 1;
       tt.tm_mday = rawStart.substring(6, 8).toInt();
     }
 
     bool hasTime = (rawStart.length() >= 15 && rawStart[8] == 'T');
     if (hasTime) {
       tt.tm_hour = rawStart.substring(9, 11).toInt();
-      tt.tm_min  = rawStart.substring(11, 13).toInt();
+      tt.tm_min = rawStart.substring(11, 13).toInt();
     } else {
       tt.tm_hour = 0;
-      tt.tm_min  = 0;
+      tt.tm_min = 0;
     }
 
-    copyToBuf(whenStr, cal[idx].when,    sizeof(cal[idx].when));
+    copyToBuf(whenStr, cal[idx].when, sizeof(cal[idx].when));
     copyToBuf(summary, cal[idx].summary, sizeof(cal[idx].summary));
-    cal[idx].ts     = mktime(&tt);
+    cal[idx].ts = mktime(&tt);
     cal[idx].allDay = !hasTime;
-    cal[idx].used   = true;
+    cal[idx].used = true;
 
     idx++;
     p = e + 10;
@@ -190,23 +198,69 @@ bool fetchICS() {
 void pageCalendar() {
   drawHeader(
     g_lang == "it" ? "Oggi"
-                   : "Today"
-  );
+                   : "Today");
+
+  // ---------------------------------------------------
+  // Icona calendario (RLE)
+  // ---------------------------------------------------
+  const int ICON_MARGIN = 20;
+  int iconX = 480 - ICON_MARGIN - CAL_ICON_WIDTH;
+  int iconY = PAGE_Y - 5;
+
+
+
+  drawRLE(
+    iconX,
+    iconY,
+    CAL_ICON_WIDTH,
+    CAL_ICON_HEIGHT,
+    cal_icon,
+    sizeof(cal_icon) / sizeof(RLERun));
+
+  // ---------------------------------------------------
+  // Numero del giorno centrato nell'icona (TextSize 3, sfondo bianco)
+  // ---------------------------------------------------
+  time_t now;
+  struct tm t;
+  time(&now);
+  localtime_r(&now, &t);
+
+  int day = t.tm_mday;
+  String dayStr = String(day);
+
+  // dimensione carattere
+  gfx->setTextSize(3);
+  gfx->setTextColor(COL_BG, 0xFFFF);  // testo colore tema, sfondo bianco
+
+  // centro dell'icona
+  int iconCenterX = iconX + (CAL_ICON_WIDTH / 2);
+  int iconCenterY = iconY + (CAL_ICON_HEIGHT / 2);
+
+  // width approssimato per textsize 3 (base char width ≈ 6px)
+  int textW = dayStr.length() * 18;  // 6px * 3
+  int textH = 24;                    // circa 8px * 3
+
+  int textX = iconCenterX - (textW / 2);
+  int textY = iconCenterY - (textH / 2) + 4;  // leggero offset estetico
+
+  gfx->setCursor(textX, textY);
+  gfx->print(dayStr);
+
+  // reset dimensione testo
+  gfx->setTextSize(TEXT_SCALE);
+
 
   int y = PAGE_Y;
 
   struct Row {
     uint8_t idx;
-    time_t  ts;
-    long    delta;
-    bool    allDay;
+    time_t ts;
+    long delta;
+    bool allDay;
   };
 
   Row rows[3];
   uint8_t n = 0;
-
-  time_t now;
-  time(&now);
 
   for (uint8_t i = 0; i < 3; i++) {
     if (!cal[i].used || cal[i].summary[0] == '\0')
@@ -215,9 +269,9 @@ void pageCalendar() {
     long d = cal[i].allDay ? 0 : (long)difftime(cal[i].ts, now);
     if (d < 0) d = 86400;
 
-    rows[n].idx    = i;
-    rows[n].ts     = cal[i].ts;
-    rows[n].delta  = d;
+    rows[n].idx = i;
+    rows[n].ts = cal[i].ts;
+    rows[n].delta = d;
     rows[n].allDay = cal[i].allDay;
     n++;
   }
@@ -227,8 +281,7 @@ void pageCalendar() {
       PAGE_X,
       y + CHAR_H,
       (g_lang == "it" ? "Nessun evento" : "No events"),
-      TEXT_SCALE + 1
-    );
+      TEXT_SCALE + 1);
     return;
   }
 

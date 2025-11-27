@@ -2,37 +2,31 @@
 
 // -----------------------------------------------------------------------------
 //  SQUARED — QOD (Quote Of The Day)
-//  Modulo: gestione frase del giorno (OpenAI → preferita, ZenQuotes → fallback)
-//  - Cache giornaliera con controllo fonte (AI / fallback)
-//  - Normalizzazione ASCII per compatibilità pannello
-//  - Parsing leggero JSON text-only
-//  - Rendering centrato a paragrafi
 // -----------------------------------------------------------------------------
 
 #include <Arduino.h>
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include "../handlers/globals.h"
+#include "../images/qod.h"        // sfondo RLE
 
 // -----------------------------------------------------------------------------
-// Risorse condivise dal core SquaredCoso
+// Risorse core
 // -----------------------------------------------------------------------------
 extern Arduino_RGB_Display* gfx;
 
 extern const int PAGE_X, PAGE_Y, PAGE_W, PAGE_H;
 extern const int CHAR_H, BASE_CHAR_W, BASE_CHAR_H, TEXT_SCALE;
 
-extern const uint16_t COL_BG;
-extern const uint16_t COL_ACCENT1;
-
 extern String g_lang;
 extern String g_oa_key;
 extern String g_oa_topic;
 
 extern bool   httpGET(const String&, String&, uint32_t);
-//extern bool   isHttpOk(int);
 extern int    indexOfCI(const String&, const String&, int);
-extern bool   jsonFindStringKV(const String&, const String&, int, String&);
+
+extern bool   jsonKV(const String&, const char*, String&);
+
 extern String jsonEscape(const String&);
 extern String decodeJsonUnicode(const String&);
 extern String sanitizeText(const String&);
@@ -40,15 +34,12 @@ extern void   todayYMD(String&);
 extern void   drawHeader(const String&);
 extern void   drawBoldMain(int16_t, int16_t, const String&, uint8_t);
 extern void   drawParagraph(int16_t, int16_t, int16_t, const String&, uint8_t);
+extern void   drawCurrentPage();
 
 extern WebServer web;
 
 // -----------------------------------------------------------------------------
-// Cache locale QOD
-//  - frase
-//  - autore
-//  - data cache (YYYYMMDD) → evita richieste ripetute
-//  - flag fonte (AI / ZenQuotes)
+// Cache QOD
 // -----------------------------------------------------------------------------
 static String qod_text;
 static String qod_author;
@@ -56,19 +47,28 @@ static String qod_date_ymd;
 static bool   qod_from_ai = false;
 
 // -----------------------------------------------------------------------------
-// Conversione virgolette / apici / trattini → ASCII per compatibilità display
+// Sanitize virgolette + normalizzazione Unicode → ASCII sicuro
 // -----------------------------------------------------------------------------
 static String qodSanitizeQuotes(const String& in) {
   String s = in;
+
   s.replace("“","\""); s.replace("”","\"");
-  s.replace("„","\""); s.replace("«","\""); s.replace("»","\"");
+  s.replace("„","\""); s.replace("«","\"");
+  s.replace("»","\"");
   s.replace("‘","'");  s.replace("’","'");
   s.replace("—","-");  s.replace("–","-");
+
+  s.replace("à","a");  s.replace("á","a");
+  s.replace("è","e");  s.replace("é","e"); s.replace("ê","e");
+  s.replace("ì","i");
+  s.replace("ò","o");  s.replace("ó","o");
+  s.replace("ù","u");  s.replace("ú","u");
+
   return s;
 }
 
 // -----------------------------------------------------------------------------
-// Fallback: ZenQuotes (API semplice, JSON prevedibile)
+// Fallback ZenQuotes
 // -----------------------------------------------------------------------------
 static bool fetchQOD_ZenQuotes() {
   String body;
@@ -76,9 +76,12 @@ static bool fetchQOD_ZenQuotes() {
     return false;
 
   String q, a;
-  if (!jsonFindStringKV(body, "q", 0, q))
+
+
+  if (!jsonKV(body, "q", q))
     return false;
-  jsonFindStringKV(body, "a", 0, a);
+
+  jsonKV(body, "a", a);
 
   qod_text   = qodSanitizeQuotes(sanitizeText(q));
   qod_author = qodSanitizeQuotes(sanitizeText(a));
@@ -90,9 +93,7 @@ static bool fetchQOD_ZenQuotes() {
 }
 
 // -----------------------------------------------------------------------------
-// Fetch via OpenAI Responses API (se configurata)
-//  - prompt breve e vincolato
-//  - estrazione della prima chiave "text"
+// OpenAI
 // -----------------------------------------------------------------------------
 static bool fetchQOD_OpenAI() {
 
@@ -108,14 +109,14 @@ static bool fetchQOD_OpenAI() {
     return false;
 
   http.addHeader("Content-Type", "application/json");
-  http.addHeader("Authorization", String("Bearer ") + g_oa_key);
+  http.addHeader("Authorization", "Bearer " + g_oa_key);
 
   String prompt =
     (g_lang == "it")
-      ? ("Scrivi una breve frase in stile " + g_oa_topic +
-         " in buon italiano e senza errori. Solo la frase, sempre nuova.")
-      : ("Write a short quote in the style of " + g_oa_topic +
-         " in good English without errors. Only the quote, always new.");
+      ? ("Scrivi una frase breve, originale e logicamente coerente nello stile di \"" + g_oa_topic +
+         "\". Mantieni il tono caratteristico ma evita assurdità o parole fuori contesto. Solo la frase.")
+      : ("Write a short, original and coherent sentence in the style of \"" + g_oa_topic +
+         "\". Keep the tone but avoid absurdity or noise. Only the sentence.");
 
   String body =
     "{\"model\":\"gpt-4.1-nano\","
@@ -123,7 +124,7 @@ static bool fetchQOD_OpenAI() {
     "\"input\":\"" + jsonEscape(prompt) + "\"}";
 
   int code = http.POST(body);
-  if (!isHttpOk(code)) {
+  if (!(code >= 200 && code < 300)) {
     http.end();
     return false;
   }
@@ -143,8 +144,8 @@ static bool fetchQOD_OpenAI() {
   String raw = resp.substring(p + 1, q);
 
   raw = decodeJsonUnicode(raw);
-  raw.replace("\\n"," ");
-  raw.replace("\\","");
+  raw.replace("\\n", " ");
+  raw.replace("\\", "");
   raw.trim();
 
   qod_text = qodSanitizeQuotes(sanitizeText(raw));
@@ -157,10 +158,7 @@ static bool fetchQOD_OpenAI() {
 }
 
 // -----------------------------------------------------------------------------
-// Logica master QOD
-//  - controlla cache del giorno
-//  - preferisce AI se disponibile
-//  - fallback automatico ZenQuotes
+// Master fetch
 // -----------------------------------------------------------------------------
 static bool fetchQOD() {
 
@@ -195,7 +193,7 @@ static bool fetchQOD() {
 }
 
 // -----------------------------------------------------------------------------
-// Handler Web: invalida cache e rigenera frase al volo
+// WebUI: forza rigenerazione
 // -----------------------------------------------------------------------------
 static void handleForceQOD() {
 
@@ -208,59 +206,56 @@ static void handleForceQOD() {
   drawCurrentPage();
 
   web.send(200, "text/html; charset=utf-8",
-    "<!doctype html><meta charset='utf-8'><body>"
-    "<h3>Frase rigenerata</h3>"
-    "<p><a href='/settings'>Back</a></p>"
-    "</body>");
+           "<!doctype html><meta charset='utf-8'><body>"
+           "<h3>Frase rigenerata</h3>"
+           "<p><a href='/settings'>Back</a></p>"
+           "</body>");
 }
 
 // -----------------------------------------------------------------------------
-// Rendering pagina QOD
-//  - titolo
-//  - frase con word-wrap automatico
-//  - autore centrato in basso
+// Rendering pagina
 // -----------------------------------------------------------------------------
 static void pageQOD() {
 
-  drawHeader(g_lang == "it" ? "Frase del giorno"
-                            : "Quote of the Day");
+  // SFONDO RLE
+  drawRLE(0, 0, QOD_IMG_WIDTH, QOD_IMG_HEIGHT,
+          qod_img, qod_img_count);
+
+  drawHeader(g_lang == "it" ? "Frase del giorno" : "Quote of the Day");
+
   int y = PAGE_Y;
 
   if (!qod_text.length()) {
-    drawBoldMain(
-      PAGE_X,
-      y + CHAR_H,
+    drawBoldMain(PAGE_X, y + CHAR_H,
       g_lang == "it" ? "Nessuna frase disponibile"
                      : "No quote available",
-      TEXT_SCALE + 1
-    );
+      TEXT_SCALE + 1);
     return;
   }
 
-  const uint16_t L = qod_text.length();
-  const uint8_t scale = (L < 80 ? 4 : (L < 160 ? 3 : 2));
-
+  gfx->setTextColor(0x0000);
   String full = "\"" + qod_text + "\"";
+
+  const uint16_t L = qod_text.length();
+  const uint8_t  scale = (L < 80 ? 4 : (L < 160 ? 3 : 2));
+
   drawParagraph(PAGE_X, y, PAGE_W, full, scale);
 
   String author =
     qod_author.length()
       ? ("- " + qod_author)
-      : (g_lang == "it" ? "- sconosciuto"
-                        : "- unknown");
+      : (g_lang == "it" ? "- sconosciuto" : "- unknown");
 
   const uint8_t aScale = (author.length() < 18 ? 3 : 2);
-
+  const int padding = 20;
   const int aW = author.length() * BASE_CHAR_W * aScale;
-  const int aX = (480 - aW) / 2;
-  const int aY =
-    PAGE_Y + PAGE_H - (BASE_CHAR_H * aScale) - 8;
+  const int aX = 480 - aW - padding;
+  const int aY = PAGE_Y + PAGE_H - (BASE_CHAR_H * aScale) - 8;
 
-  gfx->setTextColor(COL_ACCENT1, COL_BG);
+  gfx->setTextColor(0x0000);
   gfx->setTextSize(aScale);
   gfx->setCursor(aX, aY);
   gfx->print(author);
-
   gfx->setTextSize(TEXT_SCALE);
 }
 

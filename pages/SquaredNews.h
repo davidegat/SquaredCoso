@@ -189,11 +189,14 @@ void pageNews() {
   const int leftPad  = PAGE_X + 10;
   const int rightPad = 470;
 
-  const int charW    = BASE_CHAR_W * SZ;
-  const int maxChars = (rightPad - leftPad) / charW;
+  const int charW     = BASE_CHAR_W * SZ;
+  const int maxChars  = (rightPad - leftPad) / charW;
 
-  int y = PAGE_Y + 8;
-  const int lineH = (CHAR_H * SZ) + 6;
+  // Interlinea più compatta
+  const int lineH = (CHAR_H * SZ) + 2;
+
+  // Primo titolo
+  int y = PAGE_Y + 6;
 
   if (!news_title[0].length()) {
     gfx->setCursor(leftPad, y + lineH);
@@ -202,6 +205,9 @@ void pageNews() {
     return;
   }
 
+  // ----------------------------------------------------------------------
+  // Loop sulle 5 notizie
+  // ----------------------------------------------------------------------
   for (uint8_t i = 0; i < NEWS_MAX; i++) {
 
     if (!news_title[i].length()) continue;
@@ -210,6 +216,9 @@ void pageNews() {
     const int len = text.length();
     int start = 0;
 
+    // ------------------------------------------------------------------
+    // Word-wrap
+    // ------------------------------------------------------------------
     while (start < len) {
 
       int remaining = len - start;
@@ -234,9 +243,16 @@ void pageNews() {
       start = (cut < len && text[cut] == ' ') ? (cut + 1) : cut;
     }
 
-    if (i < NEWS_MAX - 1 && y < 430) {
-      drawHLine(y - 3);
-      y += 4;
+    if (y > 440) break;
+
+    // ------------------------------------------------------------------
+    // Separatore simmetrico sopra/sotto
+    // ------------------------------------------------------------------
+    if (i < NEWS_MAX - 1) {
+
+      y += 5;             // spazio sotto l’ultimo rigo del blocco
+      drawHLine(y);
+      y += 5;             // spazio sopra il prossimo blocco
     }
 
     if (y > 440) break;

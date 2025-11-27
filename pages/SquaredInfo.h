@@ -7,7 +7,7 @@
 #include "../handlers/globals.h"
 
 // ============================================================================
-// PAGE INFO – OTTIMIZZATA
+// PAGE INFO – SquaredCoso
 // ============================================================================
 
 // extern
@@ -39,7 +39,7 @@ extern bool g_show[];
 #define INFO_BADGE_H  18
 
 // ============================================================================
-// BADGE (molto più leggero)
+// BADGE
 // ============================================================================
 static inline void drawBadge(int16_t x, int16_t y, uint8_t v) {
   uint16_t col =
@@ -50,7 +50,7 @@ static inline void drawBadge(int16_t x, int16_t y, uint8_t v) {
 }
 
 // ============================================================================
-// FORMAT BYTES (zero String temporanee inutili)
+// FORMAT BYTES
 // ============================================================================
 static inline String formatBytes(size_t b) {
   char buf[20];
@@ -61,7 +61,7 @@ static inline String formatBytes(size_t b) {
 }
 
 // ============================================================================
-// UPTIME leggibile – zero sprechi
+// UPTIME leggibile
 // ============================================================================
 static inline String formatUptime() {
   unsigned long sec = millis() / 1000UL;
@@ -76,7 +76,7 @@ static inline String formatUptime() {
 }
 
 // ============================================================================
-// STIMA CPU — ottimizzata (loop più efficiente)
+// STIMA CPU 
 // ============================================================================
 static uint8_t estimateCPU() {
 
@@ -99,7 +99,7 @@ static uint8_t estimateCPU() {
 }
 
 // ============================================================================
-// PAGINA INFO — versione ottimizzata
+// PAGINA INFO
 // ============================================================================
 static void pageInfo() {
 
