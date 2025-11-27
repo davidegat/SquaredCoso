@@ -1,5 +1,5 @@
 const char* FW_NAME = "SquaredCoso";
-const char* FW_VERSION = "v1.0.1";
+const char* FW_VERSION = "v1.1.0";
 extern const char* FW_NAME;
 extern const char* FW_VERSION;
 
