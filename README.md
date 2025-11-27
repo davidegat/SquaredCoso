@@ -1,4 +1,4 @@
-# SquaredCoso 1.0.0 (Italiano / English)
+# SquaredCoso 1.1.0 (Italiano / English)
 
 <img width="480" height="480" alt="cosino" src="https://github.com/user-attachments/assets/382ad3ab-e1f3-4cf2-bc89-c8cf43fca65d" />
 
@@ -16,12 +16,14 @@ Il dispositivo può mostrare:
 * Qualità dell’aria
 * Orologio digitale
 * Orologio binario
+* Visualizzazioni temporali avanzate (Chronos)
 * Calendario ICS
 * Grafico temperatura 24h
 * Ore di luce, twilight, UV e fase lunare
 * Bitcoin e variazione giornaliera
 * Cambi valutari
 * Countdown multipli
+* Note veloci in stile post-it
 * News RSS
 * Frase del giorno (OpenAI o ZenQuotes)
 * Stato Home Assistant
@@ -80,16 +82,17 @@ Dopo la configurazione, il dispositivo passa in modalità **STA** e diventa ragg
 * Countdown
 * Impostazioni FX e BTC
 * Chiave OpenAI e argomento frase del giorno
+* Testo e colore per i post-it
 * IP/token Home Assistant
-* Pagine da visualizzare
+* Pagine da visualizzare e parametri grafici
 
 Le impostazioni vengono salvate in NVS e persistono ai riavvii.
 
 Il firmware gestisce in autonomia:
 
 * sincronizzazione NTP
-* recupero dati dalle API
-* aggiornamento contenuti
+* recupero dati dalle API con sanitizzazione testuale e helper JSON condivisi
+* aggiornamento contenuti con controllo di stato e splash di versione all’avvio
 * riconnessioni Wi-Fi
 * transizioni grafiche e backlight PWM
 
@@ -112,6 +115,10 @@ Ora in grande formato con data.
 ### Orologio binario
 
 Visualizzazione binaria di ore, minuti e secondi.
+
+### Chronos
+
+Conteggio del tempo rimanente di giorno, mese, anno e altre scadenze temporali.
 
 ### Calendario ICS
 
@@ -136,6 +143,10 @@ Tabella valute rispetto alla valuta base.
 ### Countdown
 
 Fino a otto eventi con nome e data.
+
+### Post-it
+
+Nota singola con titolo, testo e scelta del colore per annotazioni veloci gestite dalla WebUI.
 
 ### News
 
@@ -164,6 +175,7 @@ Uptime, rete, memoria, CPU, pagine attive.
 * `SquaredCoso.ino` — logica principale (display, Wi-Fi, NTP, rotazione, fetch)
 * `SquaredWeb.ino` — captive portal e WebUI
 * `handlers/` — moduli di supporto
+* `handlers/json_helpers.h` — funzioni condivise per parsing e gestione JSON
 * `pages/` — pagine del sistema
 * `images/` — asset grafici RLE
 * `tools/` — script di utilità
@@ -190,12 +202,14 @@ The device can display:
 * Air quality
 * Digital clock
 * Binary clock
+* Chronos advanced time views
 * ICS calendar
 * 24h temperature graph
 * Daylight, twilight, UV, moon phase
 * Bitcoin and daily change
 * FX rates
 * Multiple countdowns
+* Sticky notes
 * RSS news
 * Quote of the day (OpenAI or ZenQuotes)
 * Home Assistant entity status
@@ -245,16 +259,17 @@ After configuration, it switches to **STA mode**, becomes reachable through its 
 * Countdown timers
 * FX/BTC settings
 * OpenAI key and topic
+* Post-it content and color
 * Home Assistant IP/token
-* Enabled pages
+* Enabled pages and visual parameters
 
 Settings are saved to NVS and persist across reboots.
 
 The firmware autonomously manages:
 
 * NTP synchronization
-* Data fetching
-* Page rotation
+* Data fetching with shared JSON helpers and text sanitization
+* Page rotation with status checks and version splash at boot
 * Wi‑Fi reconnection
 * Graphic transitions and PWM backlight
 
@@ -277,6 +292,10 @@ Large digital time and date.
 ### Binary clock
 
 Binary view of hours, minutes and seconds.
+
+### Chronos
+
+Counters for the remaining time in the day, month, year and other deadlines.
 
 ### ICS calendar
 
@@ -302,6 +321,10 @@ Currency table relative to base currency.
 
 Up to 8 programmable events.
 
+### Sticky notes
+
+Single note with title, body and color controls for quick reminders managed through the WebUI.
+
 ### News
 
 First headlines from RSS feed.
@@ -326,7 +349,7 @@ Uptime, network details, memory, CPU, active pages.
 
 ## Code layout
 
-Same structure as the Italian section.
+Same structure as the Italian section, including the shared `handlers/json_helpers.h` utilities for consistent JSON parsing.
 
 ---
 
