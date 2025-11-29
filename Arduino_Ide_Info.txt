@@ -1,0 +1,254 @@
+ITALIANO
+========
+
+ISTRUZIONI PER FLASHARE SQUAREDCOSO CON ARDUINO IDE
+
+Requisiti di compatibilità
+SquaredCoso funziona correttamente solo con:
+– ESP32 Arduino Core versione 2.0.16 oppure 2.0.17
+– GFX Library for Arduino versione 1.6.0
+
+Qualsiasi versione differente può causare errori di compilazione, problemi con il display RGB o malfunzionamenti del firmware.
+
+Librerie necessarie
+Le seguenti librerie devono essere presenti nel sistema nelle versioni indicate:
+
+Arduino.h
+Arduino_GFX_Library.h (versione richiesta: GFX Library for Arduino 1.6.0)
+DNSServer.h
+ESPmDNS.h
+HTTPClient.h
+Preferences.h
+WiFi.h
+WiFiClientSecure.h
+WebServer.h
+esp_chip_info.h
+esp_system.h
+math.h
+time.h
+
+Tutte fanno parte del core ESP32 (tranne GFX), quindi basta avere il pacchetto ESP32 corretto.
+
+Prima accensione e primo flash
+Al primo flash è necessario accedere fisicamente al circuito del pannello, accenderlo tenendo premuto il tasto BOOT e collegarlo tramite USB-C. Questo mette l’ESP32-S3 in modalità bootloader.
+Dopo il primo flash, questa procedura non serve più.
+
+Selezione della scheda
+In Arduino IDE:
+Strumenti → Scheda → ESP32 Arduino → ESP32S3 Dev Module
+
+Impostazioni consigliate
+In Strumenti configurare:
+
+USB CDC On Boot: Enabled
+CPU Frequency: 240 MHz (WiFi)
+Flash Size: 16 MB
+Flash Mode: QIO
+Partition Scheme: Huge APP (3MB No OTA)
+PSRAM: Enabled (oppure OPI PSRAM)
+USB Mode: USB-OTG oppure Internal USB
+JTAG: Disabled
+Upload Speed: 921600 (o 460800 se serve)
+
+Note:
+– Huge APP è indispensabile per il numero elevato di immagini.
+– PSRAM deve essere sempre attiva.
+– Le versioni ESP32 core compatibili sono solo 2.0.16 e 2.0.17.
+– In caso di problemi video, controllare la versione della GFX Library.
+
+Riconoscimento della porta
+Collega la board. Se non compare nessuna porta seriale:
+– tieni premuto BOOT
+– collega il cavo o premi RESET
+– rilascia BOOT dopo un secondo
+
+Apertura del progetto
+Apri SquaredCoso.ino.
+Assicurati che le cartelle handlers, pages e images siano accanto al file principale.
+Compila con “Verifica/Compila”.
+
+Caricamento del firmware
+Seleziona la porta corretta e premi “Carica”.
+Se compare “Failed to connect”, ripeti BOOT/RESET e riduci la velocità di upload.
+
+Primo avvio dopo il flash
+Il dispositivo si riavvia, mostra la schermata iniziale e crea una rete Wi-Fi SQCOSO-XXXX.
+Connettiti e configura Wi-Fi, lingua e città tramite la WebUI.
+
+---
+
+## TROUBLESHOOTING
+
+Non compila
+– Controlla di usare ESP32 core versione 2.0.16 o 2.0.17.
+– Assicurati che la GFX Library for Arduino sia installata nella versione 1.6.0.
+– Verifica che tutte le altre librerie elencate siano disponibili e senza duplicati.
+– Se ottieni errori strani, cancella la cartella delle build di Arduino IDE e ricompila.
+
+Non fa l’upload
+– Verifica di aver selezionato la scheda: ESP32S3 Dev Module.
+– Controlla la porta USB corretta.
+– Se non compare, entra manualmente in bootloader premendo BOOT durante il collegamento.
+– Se ancora fallisce, riduci l’upload speed da 921600 a 460800.
+
+Compila e fa l’upload ma il display rimane nero
+– Controlla che la partizione sia Huge APP (3MB No OTA).
+– Controlla che PSRAM sia impostata su Enabled oppure OPI PSRAM.
+– Assicurati di avere core ESP32 2.0.16 o 2.0.17.
+– Controlla la versione della GFX Library (1.6.0).
+
+Perdo le impostazioni Wi-Fi o non vengono salvate
+– Assicurati che “Erase All Before Sketch Upload” sia disattivato.
+– Controlla che il tuo Arduino IDE non stia forzando una cancellazione completa della flash.
+
+Upload impossibile nonostante tutto
+– Prova un cavo USB migliore (molti cavi economici trasmettono solo alimentazione).
+– Cambia porta USB del PC.
+– Riduci l’upload speed.
+– Assicurati di premere BOOT prima di dare alimentazione alla scheda.
+
+La frase generata dall’AI non appare
+– Devi specificare una chiave API OpenAI valida.
+– Per ottenere una chiave: accedi al tuo account OpenAI, vai nella sezione API Keys e generane una nuova.
+– Inserisci anche un argomento (topic) per la frase del giorno.
+
+Home Assistant non viene rilevato
+– Specifica l’IP corretto della tua istanza HA.
+– Genera un token: in Home Assistant vai in Il tuo profilo → Token a lungo termine → Crea token.
+– Assicurati che la rete locale permetta la comunicazione fra dispositivi.
+– Verifica che non ci siano VLAN, firewall o router che isolano i due device.
+
+Non ricevo notizie RSS
+– Assicurati che l’URL del feed RSS sia valido e raggiungibile.
+– Evita feed che richiedono autenticazione o HTTPS non standard.
+
+Non ricevo eventi del calendario ICS
+– Controlla che l’URL ICS sia corretto e pubblico.
+– La funzione ICS è in sviluppo: alcuni calendari potrebbero non funzionare ancora perfettamente.
+
+Aggiunta di altri controlli utili
+– Se il Wi-Fi non si connette, ricontrolla SSID e password, oppure usa la modalità Access Point per riconfigurare.
+– Se il pannello sembra lento, prova a riavviare e controlla la PSRAM.
+– Se la WebUI non si apre, verifica che l’IP mostrato nella pagina INFO sia accessibile dal tuo PC o telefono.
+
+============================================================
+ENGLISH
+=======
+
+INSTRUCTIONS TO FLASH SQUAREDCOSO USING ARDUINO IDE
+
+Compatibility requirements
+SquaredCoso works correctly only with:
+– ESP32 Arduino Core 2.0.16 or 2.0.17
+– GFX Library for Arduino version 1.6.0
+
+Other versions may cause compilation problems or display malfunction.
+
+Required libraries
+Make sure the following libraries are available in these versions:
+
+Arduino.h
+Arduino_GFX_Library.h (required: GFX Library for Arduino 1.6.0)
+DNSServer.h
+ESPmDNS.h
+HTTPClient.h
+Preferences.h
+WiFi.h
+WiFiClientSecure.h
+WebServer.h
+esp_chip_info.h
+esp_system.h
+math.h
+time.h
+
+First power-on and first flash
+For the first flash, you must hold BOOT while powering the device and connecting USB-C.
+After the first flash, this is no longer needed.
+
+Board selection
+Tools → Board → ESP32 Arduino → ESP32S3 Dev Module
+
+Recommended settings
+Set the following under Tools:
+
+USB CDC On Boot: Enabled
+CPU Frequency: 240 MHz (WiFi)
+Flash Size: 16 MB
+Flash Mode: QIO
+Partition Scheme: Huge APP (3MB No OTA)
+PSRAM: Enabled or OPI PSRAM
+USB Mode: USB-OTG or Internal USB
+JTAG: Disabled
+Upload Speed: 921600 (or 460800)
+
+Serial port detection
+If no serial port appears:
+Hold BOOT → plug USB or press RESET → release BOOT
+
+Opening the project
+Open SquaredCoso.ino.
+Ensure handlers, pages and images are in the same directory.
+Compile.
+
+Flashing the firmware
+Select the correct port and click Upload.
+If “Failed to connect” appears, repeat BOOT/RESET and reduce upload speed.
+
+First boot after flashing
+The device reboots, shows the splash, and creates a Wi-Fi Access Point SQCOSO-XXXX.
+Connect and configure Wi-Fi, language and city.
+
+---
+
+## TROUBLESHOOTING
+
+Does not compile
+– Verify you are using ESP32 core 2.0.16 or 2.0.17.
+– Ensure GFX Library for Arduino is version 1.6.0.
+– Check that all libraries are available.
+– Remove Arduino build cache and recompile.
+
+Upload fails
+– Make sure the selected board is ESP32S3 Dev Module.
+– Select the correct USB port.
+– Enter bootloader manually by holding BOOT while plugging in.
+– Reduce upload speed.
+
+Upload works but the display stays black
+– Use Huge APP partition (3MB No OTA).
+– Enable PSRAM or OPI PSRAM.
+– Ensure correct ESP32 core version.
+– Ensure GFX Library for Arduino is version 1.6.0.
+
+Wi-Fi settings are lost
+– Disable “Erase All Before Sketch Upload”.
+– Ensure your IDE is not forcing a flash erase.
+
+Cannot upload despite everything
+– Try another USB cable (data-capable).
+– Change USB port.
+– Reduce upload speed.
+– Hold BOOT before powering the device.
+
+AI quotes do not appear
+– Enter a valid OpenAI API key.
+– To obtain one: log in to your OpenAI account, go to API Keys, create a new key.
+– Provide a topic for the quote.
+
+Home Assistant page does not work
+– Specify the correct HA IP.
+– Generate a long-lived token from Home Assistant → Your profile → Tokens.
+– Ensure network devices can communicate (no VLAN/firewall isolation).
+
+RSS feed does not load
+– Check that the RSS URL is valid and reachable.
+
+ICS calendar does not load
+– Verify the ICS URL is correct and public.
+– The ICS parser is still under refinement; some calendars may not work.
+
+Additional useful checks
+– If Wi-Fi fails, try Access Point mode and reconfigure.
+– If the device slows down, verify PSRAM is enabled.
+– If WebUI does not open, check the IP shown in the INFO page.
+
