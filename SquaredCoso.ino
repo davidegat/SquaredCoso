@@ -1,37 +1,10 @@
-const char* FW_NAME = "SquaredCoso";
-const char* FW_VERSION = "v1.1.0";
-extern const char* FW_NAME;
-extern const char* FW_VERSION;
-
 /*
    ============================================================================
    SquaredCoso – Gat Multi Ticker (ESP32-S3 + ST7701 480x480 RGB panel)
    ============================================================================
    Autore:     Davide "gat"
    Repository: https://github.com/davidegat/SquaredCoso
-
-   DESCRIZIONE
-   -----------
-   Piattaforma informativa modulare per pannello 480x480 basato su ESP32-S3:
-   rotazione automatica di pagine meteo, aria, orologio, calendario ICS,
-   Bitcoin, cambi valutari, countdown multipli, ore di luce, RSS news,
-   Quote Of the Day e info di sistema.
-
-   Questo file è il "core" del firmware:
-   - inizializza il pannello RGB ST7701 (Panel-4848S040)
-   - gestisce Wi-Fi, NTP e WebUI (AP/STA + captive portal)
-   - carica/salva configurazioni da NVS
-   - orchestra il fetch periodico dei dati remoti
-   - controlla la rotazione delle pagine e le transizioni fade/splash
-
-   LICENZA
-   -------
-   Creative Commons BY-NC 4.0
-   - Uso consentito solo non-commerciale
-   - Ridistribuzione ammessa con attribuzione a "davidegat"
-   - Modifiche consentite mantenendo la stessa licenza
-   - Il codice derivato da questo progetto deve mantenere riferimento
-     al repository ufficiale SquaredCoso
+   Licenza:    Creative Commons BY-NC 4.0
 */
 
 #include <Arduino.h>
@@ -46,12 +19,19 @@ extern const char* FW_VERSION;
 #include <time.h>
 #include <math.h>
 
+// =============================================================================
+// FIRMWARE INFO
+// =============================================================================
+const char FW_NAME[] PROGMEM = "SquaredCoso";
+const char FW_VERSION[] PROGMEM = "b1.2.0";
+
 int indexOfCI(const String& src, const String& key, int from = 0);
 
 // handlers
 #include "handlers/settingshandler.h"
 #include "handlers/displayhelpers.h"
 #include "handlers/jsonhelpers.h"
+#include "handlers/touch_menu.h"
 
 // immagini
 #include "images/SquaredCoso.h"
@@ -78,9 +58,10 @@ int indexOfCI(const String& src, const String& key, int from = 0);
 #include "pages/SquaredNotes.h"
 #include "pages/SquaredChronos.h"
 
-// -----------------------------------------------------------------------------
+// =============================================================================
 // CONFIG APPLICAZIONE
-// -----------------------------------------------------------------------------
+// =============================================================================
+
 // --- Countdown ---------------------------------------------------------------
 CDEvent cd[8];
 
@@ -89,28 +70,28 @@ uint32_t PAGE_INTERVAL_MS = 15000;
 int g_page = 0;
 bool g_cycleCompleted = false;
 
-// --- Localizzazione / Lingua -------------------------------------------------
-String g_city = "Bellinzona";
-String g_lang = "it";
-String g_ics = "";
-String g_lat = "";
-String g_lon = "";
+// --- Localizzazione ----------------------------------------------------------
+String g_city = F("Bellinzona");
+String g_lang = F("it");
+String g_ics;
+String g_lat;
+String g_lon;
 
 // --- API & integrazioni ------------------------------------------------------
-String g_rss_url = "https://feeds.bbci.co.uk/news/rss.xml";
-String g_ha_ip = "";
-String g_ha_token = "";
-String g_oa_key = "";
-String g_oa_topic = "";
+String g_rss_url = F("https://feeds.bbci.co.uk/news/rss.xml");
+String g_ha_ip;
+String g_ha_token;
+String g_oa_key;
+String g_oa_topic;
 
-// --- Note (Post-it) ----------------------------------------------------------
-String g_note = "";
+// --- Note --------------------------------------------------------------------
+String g_note;
 
 // --- Bitcoin -----------------------------------------------------------------
 double g_btc_owned = NAN;
-String g_fiat = "CHF";
+String g_fiat = F("CHF");
 
-// --- Stato pagine -------------------------------------------------------------
+// --- Stato pagine ------------------------------------------------------------
 bool g_show[PAGES] = {
   true, true, true, true, true,
   true, true, true, true, true,
@@ -119,35 +100,36 @@ bool g_show[PAGES] = {
 
 bool g_pageDirty[PAGES] = { false };
 
-// --- Flag runtime -------------------------------------------------------------
+// --- Flag runtime (extern in altri file - DEVONO essere bool normali) --------
 volatile bool g_dataRefreshPending = false;
 bool g_splash_enabled = true;
+bool g_timeSynced = false;
 
-// --- Varie interne ------------------------------------------------------------
-static int lastSecond = -1;
+// --- Solo interni (non usati altrove) -----------------------------------
+static bool g_bootPhase = true;
+static int8_t lastSecond = -1;
 
-
-// -----------------------------------------------------------------------------
-// GEOCODING OPEN-METEO (auto-lat/lon se mancano in config)
-// -----------------------------------------------------------------------------
+// =============================================================================
+// GEOCODING OPEN-METEO
+// =============================================================================
 bool geocodeIfNeeded() {
   if (g_lat.length() && g_lon.length()) return true;
 
-  String url =
-    "https://geocoding-api.open-meteo.com/v1/search?count=1&format=json"
-    "&name="
-    + g_city + "&language=" + g_lang;
+  String url = F("https://geocoding-api.open-meteo.com/v1/search?count=1&format=json&name=");
+  url += g_city;
+  url += F("&language=");
+  url += g_lang;
 
   String body;
   if (!httpGET(url, body, 10000)) return false;
 
-  int p = indexOfCI(body, "\"latitude\"", 0);
+  int p = indexOfCI(body, F("\"latitude\""), 0);
   if (p < 0) return false;
   int c = body.indexOf(':', p);
   int e = body.indexOf(',', c + 1);
   g_lat = sanitizeText(body.substring(c + 1, e));
 
-  p = indexOfCI(body, "\"longitude\"", 0);
+  p = indexOfCI(body, F("\"longitude\""), 0);
   if (p < 0) return false;
   c = body.indexOf(':', p);
   e = body.indexOf(',', c + 1);
@@ -159,36 +141,28 @@ bool geocodeIfNeeded() {
   return true;
 }
 
-// -----------------------------------------------------------------------------
+// =============================================================================
 // BUS GFX / PANNELLO RGB ST7701
-// -----------------------------------------------------------------------------
+// =============================================================================
 Arduino_DataBus* bus = new Arduino_SWSPI(
-  GFX_NOT_DEFINED,
-  39,
-  48,
-  47,
-  GFX_NOT_DEFINED);
+  GFX_NOT_DEFINED, 39, 48, 47, GFX_NOT_DEFINED);
 
 Arduino_ESP32RGBPanel* rgbpanel = new Arduino_ESP32RGBPanel(
-  18, 17, 16, 21,       // DE, VSYNC, HSYNC, PCLK
-  11, 12, 13, 14, 0,    // R0..R4
-  8, 20, 3, 46, 9, 10,  // G0..G5
-  4, 5, 6, 7, 15,       // B0..B4
-  1, 10, 8, 50,         // HSYNC: pol, fp, pw, bp
-  1, 10, 8, 20,         // VSYNC: pol, fp, pw, bp
-  0,
-  12000000,
-  false, 0, 0, 0);
+  18, 17, 16, 21,
+  11, 12, 13, 14, 0,
+  8, 20, 3, 46, 9, 10,
+  4, 5, 6, 7, 15,
+  1, 10, 8, 50,
+  1, 10, 8, 20,
+  0, 12000000, false, 0, 0, 0);
 
 Arduino_RGB_Display* gfx = new Arduino_RGB_Display(
-  480, 480,
-  rgbpanel, 0, true,
-  bus, GFX_NOT_DEFINED,
+  480, 480, rgbpanel, 0, true, bus, GFX_NOT_DEFINED,
   st7701_type9_init_operations, sizeof(st7701_type9_init_operations));
 
-// -----------------------------------------------------------------------------
-// TEMA COLORE PRINCIPALE
-// -----------------------------------------------------------------------------
+// =============================================================================
+// TEMA COLORI
+// =============================================================================
 const uint16_t COL_BG = 0x1B70;
 const uint16_t COL_HEADER = 0x2967;
 const uint16_t COL_TEXT = 0xFFFF;
@@ -201,10 +175,10 @@ const uint16_t COL_WARN = 0xFFE0;
 const uint16_t COL_BAD = 0xF800;
 uint16_t g_air_bg = COL_BG;
 
-// -----------------------------------------------------------------------------
-// LAYOUT TESTO / AREA PAGINE
-// -----------------------------------------------------------------------------
-static const int HEADER_H = 50;
+// =============================================================================
+// LAYOUT
+// =============================================================================
+const int HEADER_H = 50;
 const int PAGE_X = 16;
 const int PAGE_Y = HEADER_H + 12;
 const int PAGE_W = 480 - 32;
@@ -214,26 +188,24 @@ const int BASE_CHAR_H = 8;
 const int TEXT_SCALE = 2;
 const int CHAR_H = BASE_CHAR_H * TEXT_SCALE;
 
-// -----------------------------------------------------------------------------
-// BACKLIGHT PWM (gestito da displayhelpers, qui solo pin/canale)
-// -----------------------------------------------------------------------------
+// =============================================================================
+// BACKLIGHT
+// =============================================================================
 #define GFX_BL 38
 #define PWM_CHANNEL 0
 #define PWM_FREQ 1000
 #define PWM_BITS 8
 
-// -----------------------------------------------------------------------------
-// NTP / ORA LOCALE
-// -----------------------------------------------------------------------------
-static const char* NTP_SERVER = "pool.ntp.org";
+// =============================================================================
+// NTP
+// =============================================================================
+static const char NTP_SERVER[] PROGMEM = "pool.ntp.org";
 static const long GMT_OFFSET_SEC = 3600;
 static const int DAYLIGHT_OFFSET_SEC = 3600;
 
-bool g_timeSynced = false;
-
-static bool waitForValidTime(uint32_t timeoutMs = 8000) {
+static bool waitForValidTime(uint16_t timeoutMs = 8000) {
   uint32_t t0 = millis();
-  time_t now = 0;
+  time_t now;
   struct tm info;
 
   while ((millis() - t0) < timeoutMs) {
@@ -247,13 +219,15 @@ static bool waitForValidTime(uint32_t timeoutMs = 8000) {
 
 void syncTimeFromNTP() {
   if (g_timeSynced) return;
-  configTime(GMT_OFFSET_SEC, DAYLIGHT_OFFSET_SEC, NTP_SERVER);
+  char buf[20];
+  strcpy_P(buf, NTP_SERVER);
+  configTime(GMT_OFFSET_SEC, DAYLIGHT_OFFSET_SEC, buf);
   g_timeSynced = waitForValidTime(8000);
 }
 
-// -----------------------------------------------------------------------------
+// =============================================================================
 // NVS / WEB / DNS
-// -----------------------------------------------------------------------------
+// =============================================================================
 Preferences prefs;
 DNSServer dnsServer;
 WebServer web(80);
@@ -263,13 +237,14 @@ String ap_ssid, ap_pass;
 
 const byte DNS_PORT = 53;
 
-// -----------------------------------------------------------------------------
-// SCHERMATA INFO AP CONFIG (quando parte il captive portal)
-// -----------------------------------------------------------------------------
+// =============================================================================
+// SCHERMATA AP CONFIG
+// =============================================================================
 static void drawAPScreenOnce(const String& ssid, const String& pass) {
   gfx->fillScreen(COL_BG);
   drawBoldTextColored(16, 36, F("Connettiti all'AP:"), COL_TEXT, COL_BG);
   drawBoldTextColored(16, 66, ssid, COL_TEXT, COL_BG);
+
   gfx->setTextSize(1);
   gfx->setTextColor(COL_TEXT, COL_BG);
   gfx->setCursor(16, 96);
@@ -282,18 +257,18 @@ static void drawAPScreenOnce(const String& ssid, const String& pass) {
   gfx->setTextSize(TEXT_SCALE);
 }
 
-// -----------------------------------------------------------------------------
-// AVVIO ACCESS-POINT + DNS CAPTIVE + WebUI setup
-// -----------------------------------------------------------------------------
+// =============================================================================
+// ACCESS-POINT + CAPTIVE PORTAL
+// =============================================================================
 static void startAPWithPortal() {
   uint8_t mac[6];
   WiFi.macAddress(mac);
 
-  char ssidbuf[32];
-  snprintf(ssidbuf, sizeof(ssidbuf), "PANEL-%02X%02X", mac[4], mac[5]);
+  char ssidbuf[20];
+  snprintf_P(ssidbuf, sizeof(ssidbuf), PSTR("PANEL-%02X%02X"), mac[4], mac[5]);
 
   ap_ssid = ssidbuf;
-  ap_pass = "panelsetup";
+  ap_pass = F("panelsetup");
 
   WiFi.persistent(false);
   WiFi.mode(WIFI_AP);
@@ -306,10 +281,10 @@ static void startAPWithPortal() {
   drawAPScreenOnce(ap_ssid, ap_pass);
 }
 
-// -----------------------------------------------------------------------------
-// TENTATIVO CONNESSIONE STA (SSID salvato in NVS)
-// -----------------------------------------------------------------------------
-static bool tryConnectSTA(uint32_t timeoutMs = 8000) {
+// =============================================================================
+// CONNESSIONE STA
+// =============================================================================
+static bool tryConnectSTA(uint16_t timeoutMs = 8000) {
   prefs.begin("wifi", true);
   sta_ssid = prefs.getString("ssid", "");
   sta_pass = prefs.getString("pass", "");
@@ -333,25 +308,54 @@ static bool tryConnectSTA(uint32_t timeoutMs = 8000) {
 
 bool httpGET(const String& url, String& body, uint32_t timeoutMs = 10000);
 
-// -----------------------------------------------------------------------------
-// REFRESH DATI PERIODICO
-// -----------------------------------------------------------------------------
-static int countEnabledPages() {
-  int c = 0;
-  for (int i = 0; i < PAGES; i++)
+// =============================================================================
+// SOFT REBOOT
+// =============================================================================
+static void showSettingsOK() {
+  gfx->fillScreen(COL_BG);
+  gfx->setTextSize(3);
+  gfx->setTextColor(COL_TEXT, COL_BG);
+  gfx->setCursor(150, 225);
+  gfx->print(F("Updating..."));
+}
+
+void softReboot() {
+  showSettingsOK();
+  delay(600);
+  quickFadeOut();
+
+  ensureCurrentPageEnabled();
+  g_page = firstEnabledPage();
+  lastPageSwitch = millis();
+  g_dataRefreshPending = true;
+
+  gfx->fillScreen(COL_BG);
+  drawCurrentPage();
+  quickFadeIn();
+}
+
+// =============================================================================
+// HELPER PAGINE
+// =============================================================================
+static uint8_t countEnabledPages() {
+  uint8_t c = 0;
+  for (uint8_t i = 0; i < (uint8_t)PAGES; i++)
     if (g_show[i]) c++;
   return c;
 }
 
+// =============================================================================
+// REFRESH TIMING
+// =============================================================================
 static uint32_t lastRefresh = 0;
-static const uint32_t REFRESH_MS = 10UL * 60UL * 1000UL;
-static uint32_t lastPageSwitch = 0;
+static const uint32_t REFRESH_MS = 600000UL;
+uint32_t lastPageSwitch = 0;
 
-// -----------------------------------------------------------------------------
-// SCHEDULER REFRESH (distribuisce i fetch nel tempo)
-// -----------------------------------------------------------------------------
+// =============================================================================
+// SCHEDULER REFRESH
+// =============================================================================
 RefreshStep refreshStep = R_DONE;
-uint32_t refreshDelay = 0;
+static uint32_t refreshDelay = 0;
 
 void pageCountdowns();
 
@@ -383,58 +387,42 @@ void drawCurrentPage() {
   }
 }
 
-static bool g_bootPhase = true;
-static bool force_page_full_redraw = false;
-
-// -----------------------------------------------------------------------------
-// REFRESH DI TUTTI I DATI (meteo, aria, BTC, FX, QOD, T24, SUN, NEWS, ICS)
-// -----------------------------------------------------------------------------
+// =============================================================================
+// REFRESH DATI
+// =============================================================================
 void refreshAll() {
-
-  // METEO
   if (g_show[P_WEATHER]) {
-    fetchWeather();                 // sempre
-    g_pageDirty[P_WEATHER] = true;  // sempre
+    fetchWeather();
+    g_pageDirty[P_WEATHER] = true;
   }
 
-  // ARIA
   if (g_show[P_AIR] && fetchAir())
     g_pageDirty[P_AIR] = true;
 
-  // CALENDARIO (ICS cambia sempre → sempre dirty)
   fetchICS();
   g_pageDirty[P_CAL] = true;
 
-  // BTC
   if (g_show[P_BTC] && fetchCryptoWrapper())
     g_pageDirty[P_BTC] = true;
 
-  // QOD
   if (g_show[P_QOD] && fetchQOD())
     g_pageDirty[P_QOD] = true;
 
-  // FX
   if (g_show[P_FX] && fetchFX())
     g_pageDirty[P_FX] = true;
 
-  // T24 (grafico)
   if (g_show[P_T24] && fetchTemp24())
     g_pageDirty[P_T24] = true;
 
-  // SUN (alba/tramonto)
   if (g_show[P_SUN] && fetchSun())
     g_pageDirty[P_SUN] = true;
 
-  // NEWS
   if (g_show[P_NEWS] && fetchNews())
     g_pageDirty[P_NEWS] = true;
 
-  // HOME ASSISTANT
   if (g_show[P_HA] && fetchHA())
     g_pageDirty[P_HA] = true;
 
-  // Durante il boot evita di ridisegnare inutilmente
-  // se siamo nel boot, dopo refresh dobbiamo SEMPRE ridisegnare la pagina corrente
   if (g_bootPhase) {
     gfx->fillScreen(COL_BG);
     drawCurrentPage();
@@ -442,7 +430,6 @@ void refreshAll() {
     return;
   }
 
-  // fuori dal boot, ridisegniamo solo se la pagina corrente è diventata dirty
   if (g_pageDirty[g_page]) {
     g_pageDirty[g_page] = false;
     gfx->fillScreen(COL_BG);
@@ -451,43 +438,36 @@ void refreshAll() {
   }
 }
 
-
-
-// -----------------------------------------------------------------------------
-// SELEZIONE RLE "COSINO" RANDOM PER SPLASH DI CICLO
-// -----------------------------------------------------------------------------
+// =============================================================================
+// COSINO RANDOM
+// =============================================================================
 static CosinoRLE pickRandomCosino() {
-  int r = random(0, 3);
-
-  switch (r) {
+  switch (random(0, 3)) {
     case 0: return { cosino, sizeof(cosino) / sizeof(RLERun) };
     case 1: return { cosino1, sizeof(cosino1) / sizeof(RLERun) };
-    case 2: return { cosino2, sizeof(cosino2) / sizeof(RLERun) };
+    default: return { cosino2, sizeof(cosino2) / sizeof(RLERun) };
   }
-  return { cosino, sizeof(cosino) / sizeof(RLERun) };
 }
 
+// =============================================================================
+// SETUP
+// =============================================================================
 void setup() {
   panelKickstart();
-
-  // splash iniziale (fade-in)
   showSplashFadeInOnly(SquaredCoso, SquaredCoso_count, 2000);
 
-  // ---------------------------------------------------------------------------
-  // Mostra versione firmware sopra allo splash (centrato, in basso)
-  // ---------------------------------------------------------------------------
+  // Versione firmware
   gfx->setTextSize(2);
   gfx->setTextColor(COL_TEXT);
 
-  int fwLen = strlen(FW_VERSION) * BASE_CHAR_W;
-  const int M = 8;
-  int fwX = gfx->width() - fwLen - M;
-  int fwY = gfx->height() - BASE_CHAR_H - M;
-
-  gfx->setCursor(fwX - 30, fwY);
-  gfx->print(FW_VERSION);
+  char verBuf[12];
+  strcpy_P(verBuf, FW_VERSION);
+  int fwLen = strlen(verBuf) * BASE_CHAR_W * 2;
+  gfx->setCursor(480 - fwLen - 38, 480 - BASE_CHAR_H * 2 - 8);
+  gfx->print(verBuf);
 
   loadAppConfig();
+  touchInit();
 
   if (!tryConnectSTA(8000)) {
     startAPWithPortal();
@@ -497,41 +477,30 @@ void setup() {
     g_dataRefreshPending = true;
   }
 
-  // Fai il refresh ma NON ridisegnare subito la pagina
   refreshAll();
-
-  // Marca la pagina corrente come dirty: verrà disegnata UNA SOLA VOLTA dopo lo splash
   g_pageDirty[g_page] = true;
 
-  // ---- se esiste UNA sola pagina attiva → niente splashFadeOut ----
   if (countEnabledPages() == 1) {
     g_bootPhase = false;
-
     g_page = firstEnabledPage();
-    fadeInUI();  // fai direttamente il fade-in UNA sola volta
+    fadeInUI();
     gfx->fillScreen(COL_BG);
     drawCurrentPage();
-
     lastPageSwitch = millis();
     return;
   }
 
-  // ---- 2+ pagine → comportamento normale ----
-  fadeInUI();  // il fade-in deve precedere l'unico draw
+  fadeInUI();
   g_bootPhase = false;
-
   gfx->fillScreen(COL_BG);
-  drawCurrentPage();  // DISEGNO UNICO, niente doppioni
+  drawCurrentPage();
 }
 
-// -----------------------------------------------------------------------------
-// LOOP PRINCIPALE: Wi-Fi, refresh dati, rotazione pagine, FX animazioni
-// -----------------------------------------------------------------------------
+// =============================================================================
+// LOOP
+// =============================================================================
 void loop() {
-
-  // ---------------------------------------------------------------------------
-  // MODALITÀ AP (captive portal attivo)
-  // ---------------------------------------------------------------------------
+  // AP mode
   if (WiFi.getMode() == WIFI_AP) {
     dnsServer.processNextRequest();
     web.handleClient();
@@ -539,17 +508,11 @@ void loop() {
     return;
   }
 
-  // ---------------------------------------------------------------------------
-  // Web server (STA mode)
-  // ---------------------------------------------------------------------------
   web.handleClient();
 
-  // ---------------------------------------------------------------------------
-  // GESTIONE RICONNESSIONE Wi-Fi
-  // ---------------------------------------------------------------------------
+  // Riconnessione WiFi
   if (WiFi.status() != WL_CONNECTED) {
     static uint32_t nextTry = 0;
-
     if (millis() > nextTry) {
       nextTry = millis() + 5000;
       if (tryConnectSTA(5000)) {
@@ -557,141 +520,91 @@ void loop() {
         g_dataRefreshPending = true;
       }
     }
-
     delay(30);
     return;
   }
 
-  // ---------------------------------------------------------------------------
-  // REFRESH IMMEDIATO A RICHIESTA (es. dopo connessione Wi-Fi)
-  // ---------------------------------------------------------------------------
+  // Refresh immediato
   if (g_dataRefreshPending) {
     g_dataRefreshPending = false;
     refreshAll();
   }
 
-  // ---------------------------------------------------------------------------
-  // SCHEDULER: INIZIO CICLO DI REFRESH DISTRIBUITO
-  // ---------------------------------------------------------------------------
+  // Scheduler refresh
   if (millis() - lastRefresh >= REFRESH_MS) {
     lastRefresh = millis();
     refreshStep = R_WEATHER;
     refreshDelay = millis() + 200;
   }
 
-  // ---------------------------------------------------------------------------
-  // SCHEDULER: ESECUZIONE STEP ATTUALE (uno per volta)
-  // ---------------------------------------------------------------------------
+  // Step refresh distribuito
   if (refreshStep != R_DONE && millis() > refreshDelay) {
-
     switch (refreshStep) {
-
       case R_WEATHER:
         if (g_show[P_WEATHER]) {
-          fetchWeather();                 // sempre
-          g_pageDirty[P_WEATHER] = true;  // sempre
+          fetchWeather();
+          g_pageDirty[P_WEATHER] = true;
         }
         refreshStep = R_AIR;
         break;
-
-
-
       case R_AIR:
-        if (g_show[P_AIR] && fetchAir())
-          g_pageDirty[P_AIR] = true;
+        if (g_show[P_AIR] && fetchAir()) g_pageDirty[P_AIR] = true;
         refreshStep = R_ICS;
         break;
-
       case R_ICS:
-        // ICS sempre considerato "dirty" per il calendario
         fetchICS();
         g_pageDirty[P_CAL] = true;
         refreshStep = R_BTC;
         break;
-
       case R_BTC:
-        if (g_show[P_BTC] && fetchCryptoWrapper())
-          g_pageDirty[P_BTC] = true;
+        if (g_show[P_BTC] && fetchCryptoWrapper()) g_pageDirty[P_BTC] = true;
         refreshStep = R_QOD;
         break;
-
       case R_QOD:
-        if (g_show[P_QOD] && fetchQOD())
-          g_pageDirty[P_QOD] = true;
+        if (g_show[P_QOD] && fetchQOD()) g_pageDirty[P_QOD] = true;
         refreshStep = R_FX;
         break;
-
       case R_FX:
-        if (g_show[P_FX] && fetchFX())
-          g_pageDirty[P_FX] = true;
+        if (g_show[P_FX] && fetchFX()) g_pageDirty[P_FX] = true;
         refreshStep = R_T24;
         break;
-
       case R_T24:
-        if (g_show[P_T24] && fetchTemp24())
-          g_pageDirty[P_T24] = true;
+        if (g_show[P_T24] && fetchTemp24()) g_pageDirty[P_T24] = true;
         refreshStep = R_SUN;
         break;
-
       case R_SUN:
-        if (g_show[P_SUN] && fetchSun())
-          g_pageDirty[P_SUN] = true;
+        if (g_show[P_SUN] && fetchSun()) g_pageDirty[P_SUN] = true;
         refreshStep = R_NEWS;
         break;
-
       case R_NEWS:
-        if (g_show[P_NEWS] && fetchNews())
-          g_pageDirty[P_NEWS] = true;
+        if (g_show[P_NEWS] && fetchNews()) g_pageDirty[P_NEWS] = true;
         refreshStep = R_HA;
         break;
-
       case R_HA:
-        if (g_show[P_HA] && fetchHA())
-          g_pageDirty[P_HA] = true;
+        if (g_show[P_HA] && fetchHA()) g_pageDirty[P_HA] = true;
         refreshStep = R_DONE;
         break;
-
-      case R_DONE:
       default:
         break;
     }
-
-    // prossimo step → ~200ms
     refreshDelay = millis() + 200;
   }
 
-  // ---------------------------------------------------------------------------
-  // ROTAZIONE PAGINE AUTOMATICA
-  // ---------------------------------------------------------------------------
-  if (millis() - lastPageSwitch >= PAGE_INTERVAL_MS) {
+  // Rotazione pagine
+  if (!touchPaused && millis() - lastPageSwitch >= PAGE_INTERVAL_MS) {
+    uint8_t enabled = countEnabledPages();
 
-    int enabled = countEnabledPages();
-
-    // ------------------------------------------------------------
-    // UNA SOLA PAGINA ATTIVA → nessuna rotazione, nessuna transizione
-    // ------------------------------------------------------------
     if (enabled <= 1) {
-
-      // --- tick orologi ---
       time_t now = time(nullptr);
       struct tm ti;
       localtime_r(&now, &ti);
 
       if (ti.tm_sec != lastSecond) {
         lastSecond = ti.tm_sec;
-
-        // CLOCK digitale → redraw completo (serve)
-        if (g_page == P_CLOCK) {
-          g_pageDirty[g_page] = true;
-        }
-
-        // CLOCK binario → aggiornamento locale (nessun fillScreen)
-        if (g_page == P_BINARY) {
-          pageBinaryClock();  // aggiornamento istantaneo, NO flicker
-        }
+        if (g_page == P_CLOCK) g_pageDirty[g_page] = true;
+        if (g_page == P_BINARY) pageBinaryClock();
       }
 
-      // --- redraw solo quando serve (solo per CLOCK digitale) ---
       if (g_pageDirty[g_page]) {
         g_pageDirty[g_page] = false;
         gfx->fillScreen(COL_BG);
@@ -699,14 +612,10 @@ void loop() {
       }
 
       lastPageSwitch = millis();
-      return;  // nessuna transizione
+      return;
     }
 
-    // ------------------------------------------------------------
-    // ROTAZIONE CLASSICA (fade, splash, transizioni)
-    // ------------------------------------------------------------
     quickFadeOut();
-
     int oldPage = g_page;
     bool ok = advanceToNextEnabled();
 
@@ -717,7 +626,6 @@ void loop() {
       g_cycleCompleted = true;
 
     if (g_cycleCompleted) {
-
       if (g_splash_enabled) {
         CosinoRLE c = pickRandomCosino();
         showCycleSplash(c.data, c.runs, 1500);
@@ -725,9 +633,7 @@ void loop() {
       }
 
       int first = firstEnabledPage();
-      if (first < 0) first = P_CLOCK;
-
-      g_page = first;
+      g_page = (first < 0) ? P_CLOCK : first;
       g_cycleCompleted = false;
 
       drawCurrentPage();
@@ -741,56 +647,60 @@ void loop() {
     lastPageSwitch = millis();
   }
 
-  // ---------------------------------------------------------------------------
-  // ANIMAZIONI DELLA PAGINA CORRENTE
-  // ---------------------------------------------------------------------------
-  if (g_page == P_HA) {
-    tickHA();  // aggiorna gli stati ogni 1s
-    pageHA();  // ridisegna solo se ha_dirty=true
-    delay(5);
-    return;  // evita che sotto qualcosa sovrascriva la pagina
-  }
+  // Touch
+  touchLoop();
 
-  if (g_page == P_WEATHER) {
-
-    // tick particelle
-    pageWeatherParticlesTick();
-
-    // se la pagina è dirty → ridisegna tutto
-    if (g_pageDirty[P_WEATHER]) {
-      g_pageDirty[P_WEATHER] = false;
-      gfx->fillScreen(COL_BG);
-      pageWeather();  // <-- REDRAW CORRETTO
-    }
-
+  if (touchPaused) {
+    lastPageSwitch = millis();
     delay(5);
     return;
   }
 
-  if (g_page == P_AIR)
-    tickLeaves(g_air_bg);
+  // Animazioni pagina corrente
+  switch (g_page) {
+    case P_HA:
+      tickHA();
+      pageHA();
+      break;
 
-  if (g_page == P_FX)
-    tickFXDataStream(COL_BG);
+    case P_WEATHER:
+      pageWeatherParticlesTick();
+      if (g_pageDirty[P_WEATHER]) {
+        g_pageDirty[P_WEATHER] = false;
+        gfx->fillScreen(COL_BG);
+        pageWeather();
+      }
+      break;
 
-  if (g_page == P_COUNT)
-    tickCountdownSnake();
+    case P_AIR:
+      tickLeaves(g_air_bg);
+      break;
 
-  if (g_page == P_STELLAR) {
-    // Solo cometa e piccoli effetti: niente redraw completo
-    tickStellar();
-    delay(5);
-    return;  // blocca altre animazioni che potrebbero sovrascrivere
-  }
+    case P_FX:
+      tickFXDataStream(COL_BG);
+      break;
 
-  if (g_page == P_T24) {
-    int old = temp24_progress;
-    tickTemp24Anim();
+    case P_COUNT:
+      tickCountdownSnake();
+      break;
 
-    if (temp24_progress != old) {
-      gfx->fillScreen(COL_BG);
-      pageTemp24();
-    }
+    case P_STELLAR:
+      tickStellar();
+      break;
+
+    case P_T24:
+      {
+        int old = temp24_progress;
+        tickTemp24Anim();
+        if (temp24_progress != old) {
+          gfx->fillScreen(COL_BG);
+          pageTemp24();
+        }
+        break;
+      }
+
+    default:
+      break;
   }
 
   delay(5);

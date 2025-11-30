@@ -1,59 +1,64 @@
-#pragma once
 /*
-   SquaredCoso – Pagina METEO (Open-Meteo version)
-   - Geocoding da Open-Meteo (lat/lon)
-   - Fetch condizioni attuali + daily forecast (3 giorni)
-   - sanitizeText() come sempre
-   - Particelle full-screen + icone RLE (sole/nuvole/pioggia)
+===============================================================================
+   SQUARED — PAGINA "METEO" (Open-Meteo)
+   Descrizione: Geocoding Open-Meteo, condizioni attuali, forecast 3 giorni,
+                descrizioni localizzate, icone RLE, particelle dinamiche,
+                rendering compatto e ottimizzato per ESP32-S3.
+   Autore: Davide “gat” Nasato
+   Repository: https://github.com/davidegat/SquaredCoso
+   Licenza: CC BY-NC 4.0
+===============================================================================
 */
 
+#pragma once
+
+#include "../handlers/globals.h"
 #include <Arduino.h>
 #include <Arduino_GFX_Library.h>
 #include <HTTPClient.h>
-#include "../handlers/globals.h"
 
-extern Arduino_RGB_Display* gfx;
+extern Arduino_RGB_Display *gfx;
 
 extern const uint16_t COL_BG;
 extern const uint16_t COL_ACCENT1;
 extern const uint16_t COL_ACCENT2;
-extern const int      PAGE_X;
-extern const int      PAGE_Y;
+extern const int PAGE_X;
+extern const int PAGE_Y;
 
-extern void   drawHeader(const String& title);
-extern void   drawBoldMain(int16_t x, int16_t y, const String& raw, uint8_t scale);
-extern void   drawHLine(int y);
-extern bool   httpGET(const String& url, String& body, uint32_t timeoutMs);
-extern String sanitizeText(const String& in);
+extern void drawHeader(const String &title);
+extern void drawBoldMain(int16_t x, int16_t y, const String &raw,
+                         uint8_t scale);
+extern void drawHLine(int y);
+extern bool httpGET(const String &url, String &body, uint32_t timeoutMs);
+extern String sanitizeText(const String &in);
 
 extern String g_city;
 extern String g_lang;
 
-extern void drawRLE(int x, int y, int w, int h, const RLERun *data, size_t runs);
+extern void drawRLE(int x, int y, int w, int h, const RLERun *data,
+                    size_t runs);
 
-#include "../images/sole.h"
 #include "../images/nuvole.h"
 #include "../images/pioggia.h"
+#include "../images/sole.h"
 
 // ====================================================
 // METEO STATE
 // ====================================================
-static float  w_now_tempC = NAN;
+static float w_now_tempC = NAN;
 static String w_now_desc;
 static String w_desc[3];
 
 // ----------------------------------------------------
 // Geocoding → lat/lon (Open-Meteo geocoding API)
 // ----------------------------------------------------
-static bool fetchLatLon(float &lat, float &lon)
-{
+static bool fetchLatLon(float &lat, float &lon) {
   String city = g_city;
   city.trim();
   city.replace(" ", "%20");
 
-  String url =
-    "https://geocoding-api.open-meteo.com/v1/search?name=" + city +
-    "&count=1&language=en&format=json";
+  String url = "https://geocoding-api.open-meteo.com/v1/search?name=" + city +
+               "&count=1&language=en&format=json";
 
   String body;
   if (!httpGET(url, body, 8000))
@@ -71,8 +76,7 @@ static bool fetchLatLon(float &lat, float &lon)
 // ----------------------------------------------------
 // Mapping weathercode → descrizione (IT/EN)
 // ----------------------------------------------------
-static String mapWeatherCodeToDesc(int code, const String& lang)
-{
+static String mapWeatherCodeToDesc(int code, const String &lang) {
   String d = "Cloudy";
 
   // mappa basata sulla documentazione Open-Meteo
@@ -95,15 +99,24 @@ static String mapWeatherCodeToDesc(int code, const String& lang)
   }
 
   if (lang == "it") {
-    if (d == "Clear sky")        d = "Sereno";
-    else if (d == "Partly cloudy") d = "Nuvoloso";
-    else if (d == "Cloudy")        d = "Coperto";
-    else if (d == "Fog")           d = "Nebbia";
-    else if (d == "Rain")          d = "Pioggia";
-    else if (d == "Snow")          d = "Neve";
-    else if (d == "Rain shower")   d = "Rovesci";
-    else if (d == "Snow shower")   d = "Nevischio";
-    else if (d == "Thunderstorm")  d = "Temporali";
+    if (d == "Clear sky")
+      d = "Sereno";
+    else if (d == "Partly cloudy")
+      d = "Nuvoloso";
+    else if (d == "Cloudy")
+      d = "Coperto";
+    else if (d == "Fog")
+      d = "Nebbia";
+    else if (d == "Rain")
+      d = "Pioggia";
+    else if (d == "Snow")
+      d = "Neve";
+    else if (d == "Rain shower")
+      d = "Rovesci";
+    else if (d == "Snow shower")
+      d = "Nevischio";
+    else if (d == "Thunderstorm")
+      d = "Temporali";
   }
 
   return d;
@@ -112,16 +125,19 @@ static String mapWeatherCodeToDesc(int code, const String& lang)
 // ----------------------------------------------------
 // Estrai l'ennesimo weathercode dall'array daily.weathercode
 // ----------------------------------------------------
-static bool extractDailyWeathercode(const String& body, int index, int &codeOut)
-{
+static bool extractDailyWeathercode(const String &body, int index,
+                                    int &codeOut) {
   int dailyPos = body.indexOf("\"daily\"");
-  if (dailyPos < 0) return false;
+  if (dailyPos < 0)
+    return false;
 
   int wcPos = body.indexOf("\"weathercode\"", dailyPos);
-  if (wcPos < 0) return false;
+  if (wcPos < 0)
+    return false;
 
   int bracket = body.indexOf('[', wcPos);
-  if (bracket < 0) return false;
+  if (bracket < 0)
+    return false;
 
   int len = body.length();
   int p = bracket + 1;
@@ -129,17 +145,15 @@ static bool extractDailyWeathercode(const String& body, int index, int &codeOut)
 
   while (p < len) {
     // salta spazi, virgole, newline
-    while (p < len &&
-           (body[p]==' ' || body[p]==',' || body[p]=='\n' ||
-            body[p]=='\r' || body[p]=='\t'))
+    while (p < len && (body[p] == ' ' || body[p] == ',' || body[p] == '\n' ||
+                       body[p] == '\r' || body[p] == '\t'))
       p++;
 
     if (p >= len || body[p] == ']')
       break;
 
     int start = p;
-    while (p < len &&
-           (body[p]=='-' || body[p]=='+' || isdigit(body[p])))
+    while (p < len && (body[p] == '-' || body[p] == '+' || isdigit(body[p])))
       p++;
 
     if (currentIndex == index) {
@@ -156,11 +170,10 @@ static bool extractDailyWeathercode(const String& body, int index, int &codeOut)
 // ----------------------------------------------------
 // Fetch meteo da Open-Meteo
 // ----------------------------------------------------
-bool fetchWeather()
-{
+bool fetchWeather() {
   // reset stato, per evitare residui vecchi se il fetch fallisce
   w_now_tempC = NAN;
-  w_now_desc  = "";
+  w_now_desc = "";
   for (int i = 0; i < 3; i++) {
     w_desc[i] = "";
   }
@@ -169,13 +182,12 @@ bool fetchWeather()
   if (!fetchLatLon(lat, lon))
     return false;
 
-  String url =
-    "https://api.open-meteo.com/v1/forecast"
-    "?latitude="  + String(lat, 6) +
-    "&longitude=" + String(lon, 6) +
-    "&current_weather=true"
-    "&daily=weathercode"
-    "&timezone=auto";
+  String url = "https://api.open-meteo.com/v1/forecast"
+               "?latitude=" +
+               String(lat, 6) + "&longitude=" + String(lon, 6) +
+               "&current_weather=true"
+               "&daily=weathercode"
+               "&timezone=auto";
 
   String body;
   if (!httpGET(url, body, 10000))
@@ -202,7 +214,8 @@ bool fetchWeather()
       int code = (int)codef;
       String d = mapWeatherCodeToDesc(code, g_lang);
       w_now_desc = sanitizeText(d);
-      if (w_now_desc.length()) ok = true;
+      if (w_now_desc.length())
+        ok = true;
     }
   }
 
@@ -216,24 +229,25 @@ bool fetchWeather()
 
     String d = mapWeatherCodeToDesc(code, g_lang);
     w_desc[i] = sanitizeText(d);
-    if (w_desc[i].length()) ok = true;
+    if (w_desc[i].length())
+      ok = true;
   }
 
   return ok;
 }
 
-
 // ======================================================
 // ICONA DA DESCRIZIONE
 // ======================================================
-static inline int pickWeatherIcon(const String& d) {
+static inline int pickWeatherIcon(const String &d) {
   String s = d;
   s.toLowerCase();
-  if (s.indexOf("clear") >= 0 || s.indexOf("seren") >= 0) return 0;
-  if (s.indexOf("rain")  >= 0 || s.indexOf("piogg") >= 0) return 2;
+  if (s.indexOf("clear") >= 0 || s.indexOf("seren") >= 0)
+    return 0;
+  if (s.indexOf("rain") >= 0 || s.indexOf("piogg") >= 0)
+    return 2;
   return 1;
 }
-
 
 // ---------------------------------------------------------------------------
 // Particelle di polvere che rimbalzano su UI, bordi e linee orizzontali
@@ -243,25 +257,22 @@ static inline int pickWeatherIcon(const String& d) {
 struct Particle {
   int16_t x, y;
   int16_t ox, oy;
-  int8_t  vx, vy;
+  int8_t vx, vy;
   uint8_t layer;
 };
 
-static Particle  dust[N_DUST];
-static bool      dustInit = false;
-static uint32_t  dustLast = 0;
+static Particle dust[N_DUST];
+static bool dustInit = false;
+static uint32_t dustLast = 0;
 
-constexpr uint16_t dustCol[3] = {
-  0x7BEF,
-  0xAD75,
-  0xFFFF
-};
+constexpr uint16_t dustCol[3] = {0x7BEF, 0xAD75, 0xFFFF};
 
 // zone protette dalla UI: header, testo, linee, temp, icona
 // fa schifo ma per ora funziona
 
 static inline bool isUI(int x, int y) {
-  if (y < PAGE_Y + 58) return true;
+  if (y < PAGE_Y + 58)
+    return true;
 
   const int SEP0 = PAGE_Y + 60;
   const int SEP1 = PAGE_Y + 131;
@@ -282,9 +293,8 @@ static inline bool isUI(int x, int y) {
   int PAD = 24;
   int ix = 480 - NUVOLE_WIDTH - PAD;
   int iy = 480 - NUVOLE_HEIGHT - PAD;
-  if (x >= ix - 10 && x < ix + NUVOLE_WIDTH + 10 &&
-      y >= iy - 10 && y < iy + NUVOLE_HEIGHT + 10)
-  {
+  if (x >= ix - 10 && x < ix + NUVOLE_WIDTH + 10 && y >= iy - 10 &&
+      y < iy + NUVOLE_HEIGHT + 10) {
     return true;
   }
 
@@ -310,9 +320,12 @@ static inline void initDust(int i) {
   p.ox = p.x;
   p.oy = p.y;
 
-  if (i < 20)      p.layer = 0;
-  else if (i < 45) p.layer = 1;
-  else             p.layer = 2;
+  if (i < 20)
+    p.layer = 0;
+  else if (i < 45)
+    p.layer = 1;
+  else
+    p.layer = 2;
 
   int base = (p.layer == 0 ? 1 : (p.layer == 1 ? 2 : 3));
 
@@ -325,7 +338,8 @@ static inline void initDust(int i) {
 // tick animazione particelle, con rimbalzo su bordi e linee UI
 void pageWeatherParticlesTick() {
   uint32_t now = millis();
-  if (now - dustLast < 40) return;
+  if (now - dustLast < 40)
+    return;
   dustLast = now;
 
   if (!dustInit) {
@@ -335,11 +349,7 @@ void pageWeatherParticlesTick() {
     }
   }
 
-  const int UI_BARRIER_Y[3] = {
-    PAGE_Y + 60,
-    PAGE_Y + 131,
-    PAGE_Y + 200
-  };
+  const int UI_BARRIER_Y[3] = {PAGE_Y + 60, PAGE_Y + 131, PAGE_Y + 200};
 
   for (int i = 0; i < N_DUST; i++) {
 
@@ -393,10 +403,8 @@ void pageWeatherParticlesTick() {
 void pageWeather() {
   pageWeatherParticlesTick();
 
-  drawHeader(
-    g_lang == "it"
-      ? "Meteo per " + sanitizeText(g_city)
-      : "Weather in " + sanitizeText(g_city));
+  drawHeader(g_lang == "it" ? "Meteo per " + sanitizeText(g_city)
+                            : "Weather in " + sanitizeText(g_city));
 
   int y = PAGE_Y;
 
@@ -415,8 +423,8 @@ void pageWeather() {
   drawHLine(y);
   y += 16;
 
-  static const char* const it_days[3] = { "oggi", "domani", "fra 2 giorni" };
-  static const char* const en_days[3] = { "today", "tomorrow", "in 2 days" };
+  static const char *const it_days[3] = {"oggi", "domani", "fra 2 giorni"};
+  static const char *const en_days[3] = {"today", "tomorrow", "in 2 days"};
 
   for (int i = 0; i < 3; i++) {
     gfx->setCursor(PAGE_X, y);
@@ -438,20 +446,20 @@ void pageWeather() {
   int iy = 480 - NUVOLE_HEIGHT - PAD;
 
   switch (pickWeatherIcon(w_now_desc)) {
-    case 0:
-      drawRLE(ix, iy, SOLE_WIDTH, SOLE_HEIGHT,
-              sole, sizeof(sole) / sizeof(RLERun));
-      break;
+  case 0:
+    drawRLE(ix, iy, SOLE_WIDTH, SOLE_HEIGHT, sole,
+            sizeof(sole) / sizeof(RLERun));
+    break;
 
-    case 1:
-      drawRLE(ix, iy, NUVOLE_WIDTH, NUVOLE_HEIGHT,
-              nuvole, sizeof(nuvole) / sizeof(RLERun));
-      break;
+  case 1:
+    drawRLE(ix, iy, NUVOLE_WIDTH, NUVOLE_HEIGHT, nuvole,
+            sizeof(nuvole) / sizeof(RLERun));
+    break;
 
-    default:
-      drawRLE(ix, iy, PIOGGIA_WIDTH, PIOGGIA_HEIGHT,
-              pioggia, sizeof(pioggia) / sizeof(RLERun));
-      break;
+  default:
+    drawRLE(ix, iy, PIOGGIA_WIDTH, PIOGGIA_HEIGHT, pioggia,
+            sizeof(pioggia) / sizeof(RLERun));
+    break;
   }
 
   // temperatura grande in basso a sinistra
@@ -464,4 +472,3 @@ void pageWeather() {
     gfx->setTextSize(2);
   }
 }
-

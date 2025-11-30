@@ -1,17 +1,24 @@
+/*
+===============================================================================
+   SQUARED — PAGINA "INFO DEVICE"
+   Descrizione: Mostra URL di configurazione, uso CPU stimato, memoria libera,
+                pagine abilitate, firmware e modello hardware. Ottimizzato
+                per ESP32-S3 Panel-4848S040.
+   Autore: Davide “gat” Nasato
+   Repository: https://github.com/davidegat/SquaredCoso
+   Licenza: CC BY-NC 4.0
+===============================================================================
+*/
+
 #pragma once
 
+#include "../handlers/globals.h"
 #include <Arduino.h>
 #include <WiFi.h>
-#include <esp_system.h>
 #include <esp_chip_info.h>
-#include "../handlers/globals.h"
+#include <esp_system.h>
 
-// ============================================================================
-// PAGE INFO – SquaredCoso
-// ============================================================================
-
-// extern
-extern Arduino_RGB_Display* gfx;
+extern Arduino_RGB_Display *gfx;
 
 extern const uint16_t COL_BG;
 extern const uint16_t COL_TEXT;
@@ -29,23 +36,23 @@ extern const int BASE_CHAR_H;
 extern const int TEXT_SCALE;
 extern const int CHAR_H;
 
-extern void drawHeader(const String& title);
+extern void drawHeader(const String &title);
 extern void drawHLine(int y);
-extern String sanitizeText(const String& in);
+extern String sanitizeText(const String &in);
 
 extern bool g_show[];
 
-#define INFO_BADGE_W  28
-#define INFO_BADGE_H  18
+#define INFO_BADGE_W 28
+#define INFO_BADGE_H 18
 
 // ============================================================================
 // BADGE
 // ============================================================================
 static inline void drawBadge(int16_t x, int16_t y, uint8_t v) {
-  uint16_t col =
-      (v < 40) ? 0x07E0 :      // verde
-      (v < 70) ? 0xFFE0 :      // giallo
-                 0xF800;       // rosso
+  uint16_t col = (v < 40) ? 0x07E0 : // verde
+                     (v < 70) ? 0xFFE0
+                              : // giallo
+                     0xF800;    // rosso
   gfx->fillRoundRect(x, y, INFO_BADGE_W, INFO_BADGE_H, 4, col);
 }
 
@@ -54,9 +61,12 @@ static inline void drawBadge(int16_t x, int16_t y, uint8_t v) {
 // ============================================================================
 static inline String formatBytes(size_t b) {
   char buf[20];
-  if (b >= (1 << 20)) snprintf(buf, sizeof(buf), "%u MB", (unsigned)(b >> 20));
-  else if (b >= (1 << 10)) snprintf(buf, sizeof(buf), "%u KB", (unsigned)(b >> 10));
-  else snprintf(buf, sizeof(buf), "%u B", (unsigned)b);
+  if (b >= (1 << 20))
+    snprintf(buf, sizeof(buf), "%u MB", (unsigned)(b >> 20));
+  else if (b >= (1 << 10))
+    snprintf(buf, sizeof(buf), "%u KB", (unsigned)(b >> 10));
+  else
+    snprintf(buf, sizeof(buf), "%u B", (unsigned)b);
   return String(buf);
 }
 
@@ -66,9 +76,12 @@ static inline String formatBytes(size_t b) {
 static inline String formatUptime() {
   unsigned long sec = millis() / 1000UL;
 
-  unsigned d = sec / 86400UL; sec %= 86400UL;
-  unsigned h = sec / 3600UL;  sec %= 3600UL;
-  unsigned m = sec / 60UL;    sec %= 60UL;
+  unsigned d = sec / 86400UL;
+  sec %= 86400UL;
+  unsigned h = sec / 3600UL;
+  sec %= 3600UL;
+  unsigned m = sec / 60UL;
+  sec %= 60UL;
 
   char buf[20];
   snprintf(buf, sizeof(buf), "%ud %02u:%02u:%02u", d, h, m, (unsigned)sec);
@@ -76,7 +89,7 @@ static inline String formatUptime() {
 }
 
 // ============================================================================
-// STIMA CPU 
+// STIMA CPU
 // ============================================================================
 static uint8_t estimateCPU() {
 
@@ -92,8 +105,10 @@ static uint8_t estimateCPU() {
   }
 
   uint32_t dt = micros() - u0;
-  if (dt > 250000) dt = 250000;
-  if (dt <  80000) dt = 80000;
+  if (dt > 250000)
+    dt = 250000;
+  if (dt < 80000)
+    dt = 80000;
 
   return (uint8_t)constrain(map(dt, 80000, 250000, 5, 99), 5, 99);
 }
@@ -112,7 +127,8 @@ static void pageInfo() {
   // -------------------------------------------------------------------------
   // URL SETTINGS
   // -------------------------------------------------------------------------
-  const bool sta = (WiFi.getMode() == WIFI_STA && WiFi.status() == WL_CONNECTED);
+  const bool sta =
+      (WiFi.getMode() == WIFI_STA && WiFi.status() == WL_CONNECTED);
 
   char urlbuf[64];
   if (sta) {
@@ -142,14 +158,14 @@ static void pageInfo() {
   gfx->print((int)cpu);
   gfx->print("%");
 
-  drawBadge(420, y + (CHAR_H/2), cpu);
+  drawBadge(420, y + (CHAR_H / 2), cpu);
 
   y += CHAR_H * 2 + 10;
 
   // -------------------------------------------------------------------------
   // RAM
   // -------------------------------------------------------------------------
-  size_t freeHeap  = ESP.getFreeHeap();
+  size_t freeHeap = ESP.getFreeHeap();
   size_t totalHeap = ESP.getHeapSize();
 
   gfx->setCursor(PAGE_X, y + CHAR_H);
@@ -159,10 +175,9 @@ static void pageInfo() {
   gfx->print(formatBytes(totalHeap));
 
   uint8_t ramPct =
-      (uint8_t)((100 * (totalHeap - freeHeap)) /
-                (totalHeap ? totalHeap : 1));
+      (uint8_t)((100 * (totalHeap - freeHeap)) / (totalHeap ? totalHeap : 1));
 
-  drawBadge(420, y + (CHAR_H/2), ramPct);
+  drawBadge(420, y + (CHAR_H / 2), ramPct);
 
   y += CHAR_H * 2 + 10;
 
@@ -170,7 +185,8 @@ static void pageInfo() {
   // PAGINE ATTIVE
   // -------------------------------------------------------------------------
   int enabled = 0;
-  for (int i = 0; i < PAGES; i++) enabled += g_show[i] ? 1 : 0;
+  for (int i = 0; i < PAGES; i++)
+    enabled += g_show[i] ? 1 : 0;
 
   gfx->setCursor(PAGE_X, y + CHAR_H);
   gfx->print("Pages: ");
@@ -179,7 +195,7 @@ static void pageInfo() {
   gfx->print((int)PAGES);
 
   uint8_t pgPct = (uint8_t)((100 * enabled) / (PAGES ? PAGES : 1));
-  drawBadge(420, y + (CHAR_H/2), pgPct);
+  drawBadge(420, y + (CHAR_H / 2), pgPct);
 
   y += CHAR_H * 2 + 14;
   drawHLine(y);
@@ -194,7 +210,6 @@ static void pageInfo() {
   gfx->print(" ");
   gfx->print(FW_VERSION);
 
-
   y += CHAR_H * 2 + 10;
 
   gfx->setCursor(PAGE_X, y + CHAR_H);
@@ -204,6 +219,4 @@ static void pageInfo() {
 
   gfx->setCursor(PAGE_X, y + CHAR_H);
   gfx->print("Model:    ESP32-S3 Panel 4848S040");
-
 }
-

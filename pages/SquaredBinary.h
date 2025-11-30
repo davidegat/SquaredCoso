@@ -1,8 +1,19 @@
+/*
+===============================================================================
+   SQUARED — PAGINA "BINARY CLOCK"
+   Descrizione: Orologio binario 12h ottimizzato, refresh solo su cambio
+                ora/minuto, bordo fisso, bitbox, AM/PM e layout centrato.
+   Autore: Davide “gat” Nasato
+   Repository: https://github.com/davidegat/SquaredCoso
+   Licenza: CC BY-NC 4.0
+===============================================================================
+*/
+
 #pragma once
 
+#include "../handlers/globals.h"
 #include <Arduino.h>
 #include <time.h>
-#include "../handlers/globals.h"
 
 // ===========================================================================
 // COLORI BINARIO
@@ -10,27 +21,28 @@
 // - BIN_ON  : colore dei bit attivi
 // - BIN_OFF : colore dei bit inattivi
 // - BIN_TEXT: colore del testo (etichette, titoli)
-// - BIN_DEC : colore delle cifre decimali sotto i quadrati (più scuro)
+// - BIN_DEC : colore delle cifre decimali sotto i quadrati
 // ===========================================================================
-static const uint16_t BIN_BG   = 0x0000;
-static const uint16_t BIN_ON   = 0x07E0;
-static const uint16_t BIN_OFF  = 0x0180;
+
+static const uint16_t BIN_BG = 0x0000;
+static const uint16_t BIN_ON = 0x07E0;
+static const uint16_t BIN_OFF = 0x0180;
 static const uint16_t BIN_TEXT = 0x07E0;
-static const uint16_t BIN_DEC  = 0x0240;   // numeri decimali leggermente più scuri
+static const uint16_t BIN_DEC = 0x0240;
 
 static bool binary_force_first = true;
 
 // ===========================================================================
 // DISEGNO DEL BORDO DI PAGINA
-// - Bordo perimetrale sempre verde
+// - Bordo perimetrale verde
 // - Spessore 1 px per lato
 // ===========================================================================
-static inline void drawFixedBorder()
-{
-  gfx->drawFastHLine(0,   0,   480, BIN_ON); // bordo superiore
-  gfx->drawFastHLine(0, 479,  480, BIN_ON); // bordo inferiore
-  gfx->drawFastVLine(0,   0,   480, BIN_ON); // bordo sinistro
-  gfx->drawFastVLine(479, 0,   480, BIN_ON); // bordo destro
+
+static inline void drawFixedBorder() {
+  gfx->drawFastHLine(0, 0, 480, BIN_ON);   // bordo superiore
+  gfx->drawFastHLine(0, 479, 480, BIN_ON); // bordo inferiore
+  gfx->drawFastVLine(0, 0, 480, BIN_ON);   // bordo sinistro
+  gfx->drawFastVLine(479, 0, 480, BIN_ON); // bordo destro
 }
 
 // ===========================================================================
@@ -39,11 +51,11 @@ static inline void drawFixedBorder()
 // - "off" → quadrato verde scuro
 // - contorno sempre verde acceso
 // ===========================================================================
-static inline void drawBitBox(int x, int y, int size, bool on)
-{
+
+static inline void drawBitBox(int x, int y, int size, bool on) {
   uint16_t col = on ? BIN_ON : BIN_OFF;
 
-  gfx->fillRect(x, y, size, size, col);   // quadrato pieno
+  gfx->fillRect(x, y, size, size, col);    // quadrato pieno
   gfx->drawRect(x, y, size, size, BIN_ON); // bordo del quadrato
 }
 
@@ -54,12 +66,11 @@ static inline void drawBitBox(int x, int y, int size, bool on)
 // - Mostra indicatori AM / PM
 // - Ridisegna solo quando cambia ora/minuto (efficienza)
 // ===========================================================================
-inline void pageBinaryClock()
-{
+inline void pageBinaryClock() {
   static bool first_frame = true;
   static uint8_t prevH12 = 255;
-  static uint8_t prevM   = 255;
-  static uint8_t prevAM  = 255;
+  static uint8_t prevM = 255;
+  static uint8_t prevAM = 255;
 
   // -------------------------------------------------------------------------
   // LETTURA ORA ATTUALE
@@ -70,11 +81,12 @@ inline void pageBinaryClock()
   localtime_r(&now, &t);
 
   uint8_t H24 = t.tm_hour;
-  uint8_t M   = t.tm_min;
+  uint8_t M = t.tm_min;
 
   // Conversione 24h → 12h
   uint8_t H12 = H24 % 12;
-  if (H12 == 0) H12 = 12;
+  if (H12 == 0)
+    H12 = 12;
 
   uint8_t isAM = (H24 < 12);
 
@@ -86,9 +98,8 @@ inline void pageBinaryClock()
   // - AM/PM
   // - primo avvio
   // -------------------------------------------------------------------------
-  bool needRedraw =
-      first_frame || binary_force_first ||
-      (H12 != prevH12) || (M != prevM) || (isAM != prevAM);
+  bool needRedraw = first_frame || binary_force_first || (H12 != prevH12) ||
+                    (M != prevM) || (isAM != prevAM);
 
   if (!needRedraw) {
     drawFixedBorder();
@@ -96,11 +107,11 @@ inline void pageBinaryClock()
   }
 
   // Aggiorno lo stato interno
-  first_frame        = false;
+  first_frame = false;
   binary_force_first = false;
-  prevH12            = H12;
-  prevM              = M;
-  prevAM             = isAM;
+  prevH12 = H12;
+  prevM = M;
+  prevAM = isAM;
 
   // -------------------------------------------------------------------------
   // RENDER COMPLETO DELLA PAGINA
@@ -108,13 +119,13 @@ inline void pageBinaryClock()
   gfx->fillScreen(BIN_BG);
   drawFixedBorder();
 
-  const int box = 48;   // dimensione del quadrato binario
-  const int gap = 20;   // spazio tra i quadrati
+  const int box = 48; // dimensione del quadrato binario
+  const int gap = 20; // spazio tra i quadrati
 
   // Y: posizioni verticali dei tre blocchi (ore, am/pm, minuti)
-  const int hrsY   = 70;
-  const int ampmY  = 210;
-  const int minY   = 330;
+  const int hrsY = 70;
+  const int ampmY = 210;
+  const int minY = 330;
 
   // Larghezze complessive (quadrati + spazi)
   const int totalW_hrs = 4 * box + 3 * gap;
@@ -130,11 +141,11 @@ inline void pageBinaryClock()
   // TITOLO "hours"
   // -------------------------------------------------------------------------
   {
-    const char* lbl = "hours";
+    const char *lbl = "hours";
     gfx->setTextColor(BIN_TEXT, BIN_BG);
 
     int16_t tw = strlen(lbl) * BASE_CHAR_W * 2; // larghezza testo
-    int cx = hrsX + totalW_hrs/2 - tw/2;        // centratura orizzontale
+    int cx = hrsX + totalW_hrs / 2 - tw / 2;    // centratura orizzontale
 
     gfx->setCursor(cx, hrsY - 25);
     gfx->print(lbl);
@@ -143,9 +154,9 @@ inline void pageBinaryClock()
   // -------------------------------------------------------------------------
   // ORE: quadrati + valori 8 4 2 1
   // -------------------------------------------------------------------------
-  gfx->setTextColor(BIN_DEC, BIN_BG); // colore decimale più scuro
+  gfx->setTextColor(BIN_DEC, BIN_BG);
 
-  const int Hbits[4] = {8,4,2,1};
+  const int Hbits[4] = {8, 4, 2, 1};
 
   for (int i = 0; i < 4; i++) {
     int x = hrsX + i * (box + gap);
@@ -153,7 +164,7 @@ inline void pageBinaryClock()
 
     drawBitBox(x, hrsY, box, on);
 
-    gfx->setCursor(x + (box/2 - BASE_CHAR_W), hrsY + box + 12);
+    gfx->setCursor(x + (box / 2 - BASE_CHAR_W), hrsY + box + 12);
     gfx->print(Hbits[i]);
   }
 
@@ -179,11 +190,11 @@ inline void pageBinaryClock()
   // TITOLO "minutes"
   // -------------------------------------------------------------------------
   {
-    const char* lbl = "minutes";
+    const char *lbl = "minutes";
     gfx->setTextColor(BIN_TEXT, BIN_BG);
 
     int16_t tw = strlen(lbl) * BASE_CHAR_W * 2;
-    int cx = minX + totalW_min/2 - tw/2;
+    int cx = minX + totalW_min / 2 - tw / 2;
 
     gfx->setCursor(cx, minY - 25);
     gfx->print(lbl);
@@ -194,7 +205,7 @@ inline void pageBinaryClock()
   // -------------------------------------------------------------------------
   gfx->setTextColor(BIN_DEC, BIN_BG);
 
-  const int Mbits[6] = {32,16,8,4,2,1};
+  const int Mbits[6] = {32, 16, 8, 4, 2, 1};
 
   for (int i = 0; i < 6; i++) {
     int x = minX + i * (box + gap);
@@ -202,7 +213,7 @@ inline void pageBinaryClock()
 
     drawBitBox(x, minY, box, on);
 
-    gfx->setCursor(x + (box/2 - BASE_CHAR_W), minY + box + 12);
+    gfx->setCursor(x + (box / 2 - BASE_CHAR_W), minY + box + 12);
     gfx->print(Mbits[i]);
   }
 
@@ -213,8 +224,5 @@ inline void pageBinaryClock()
 // FUNZIONE DI RESET REDISEGNO
 // - Forza un ridisegno completo al prossimo ciclo pagina
 // ===========================================================================
-inline void resetBinaryClockFirstDraw()
-{
-  binary_force_first = true;
-}
 
+inline void resetBinaryClockFirstDraw() { binary_force_first = true; }

@@ -1,29 +1,39 @@
+/*
+===============================================================================
+   SQUARED — PAGINA "CALENDAR ICS"
+   Descrizione: Parser ICS leggero (solo eventi di oggi), slot compatti
+                senza allocazioni persistenti, rendering max 3 eventi
+                ordinati per prossimità temporale.
+
+                La pagina è in stato sperimentale e potrebbe non funzionare
+                con tutti i formati di calendario.
+
+   Autore: Davide “gat” Nasato
+   Repository: https://github.com/davidegat/SquaredCoso
+   Licenza: CC BY-NC 4.0
+===============================================================================
+*/
+
 #pragma once
+
+#include "../images/cal_icon.h"
 #include <Arduino.h>
 #include <time.h>
 
-// ---------------------------------------------------------------------------
-// SquaredCoso – Calendario ICS (solo eventi di oggi, senza luogo)
-// - fetchICS()      → scarica e filtra gli eventi di oggi da g_ics
-// - pageCalendar()  → mostra max 3 eventi ordinati per “quanto manca” a ora
-// - Nessuna String persistente nei dati: solo char[] + time_t in cal[]
-// ---------------------------------------------------------------------------
-
-#include "../images/cal_icon.h"
-
-// configurazione globale e helper forniti dal core di SquaredCoso
+// configurazione globale e helper
 extern String g_lang;
 extern String g_ics;
 
-extern void todayYMD(String& ymd);
-extern bool httpGET(const String& url, String& body, uint32_t timeoutMs);
-extern int indexOfCI(const String& src, const String& key, int from);
+extern void todayYMD(String &ymd);
+extern bool httpGET(const String &url, String &body, uint32_t timeoutMs);
+extern int indexOfCI(const String &src, const String &key, int from);
 
-extern void drawHeader(const String& title);
-extern void drawBoldMain(int16_t x, int16_t y, const String& raw, uint8_t scale);
-extern String sanitizeText(const String& in);
+extern void drawHeader(const String &title);
+extern void drawBoldMain(int16_t x, int16_t y, const String &raw,
+                         uint8_t scale);
+extern String sanitizeText(const String &in);
 
-extern Arduino_RGB_Display* gfx;
+extern Arduino_RGB_Display *gfx;
 
 extern const int PAGE_X;
 extern const int PAGE_Y;
@@ -36,7 +46,7 @@ extern const uint16_t COL_BG;
 extern void drawHLine(int y);
 
 // ---------------------------------------------------------------------------
-// Struttura evento ICS compatta (nessuna alloc dinamica)
+// Struttura evento ICS
 // ---------------------------------------------------------------------------
 struct CalItem {
   char when[16];
@@ -64,11 +74,13 @@ static inline void resetCal() {
 // ---------------------------------------------------------------------------
 // Estrae il testo dopo ':' fino a fine riga, con trim
 // ---------------------------------------------------------------------------
-static inline String extractAfterColon(const String& src, int pos) {
+static inline String extractAfterColon(const String &src, int pos) {
   int c = src.indexOf(':', pos);
-  if (c < 0) return "";
+  if (c < 0)
+    return "";
   int e = src.indexOf('\n', c + 1);
-  if (e < 0) e = src.length();
+  if (e < 0)
+    e = src.length();
 
   String t = src.substring(c + 1, e);
   t.trim();
@@ -78,14 +90,14 @@ static inline String extractAfterColon(const String& src, int pos) {
 // ---------------------------------------------------------------------------
 // Verifica se un timestamp ICS (YYYYMMDD...) è di oggi
 // ---------------------------------------------------------------------------
-static inline bool isTodayStamp(const String& dtstamp, const String& todayYmd) {
+static inline bool isTodayStamp(const String &dtstamp, const String &todayYmd) {
   return (dtstamp.length() >= 8) && dtstamp.startsWith(todayYmd);
 }
 
 // ---------------------------------------------------------------------------
 // Converte stampo ICS in stringa orario human-readable o "all day"
 // ---------------------------------------------------------------------------
-static inline void humanTimeFromStamp(const String& stamp, String& out) {
+static inline void humanTimeFromStamp(const String &stamp, String &out) {
   if (stamp.length() >= 15 && stamp[8] == 'T') {
     out = stamp.substring(9, 11) + ":" + stamp.substring(11, 13);
   } else {
@@ -96,11 +108,14 @@ static inline void humanTimeFromStamp(const String& stamp, String& out) {
 // ---------------------------------------------------------------------------
 // Copia String in buffer char[] con troncamento sicuro
 // ---------------------------------------------------------------------------
-static inline void copyToBuf(const String& s, char* buf, size_t bufLen) {
-  if (!bufLen) return;
+static inline void copyToBuf(const String &s, char *buf, size_t bufLen) {
+  if (!bufLen)
+    return;
   size_t n = s.length();
-  if (n >= bufLen) n = bufLen - 1;
-  for (size_t i = 0; i < n; i++) buf[i] = (char)s[i];
+  if (n >= bufLen)
+    n = bufLen - 1;
+  for (size_t i = 0; i < n; i++)
+    buf[i] = (char)s[i];
   buf[n] = '\0';
 }
 
@@ -108,7 +123,6 @@ static inline void copyToBuf(const String& s, char* buf, size_t bufLen) {
 // fetchICS
 // - scarica il file ICS da g_ics
 // - raccoglie solo gli eventi di oggi in cal[0..2]
-// - evita allocazioni permanenti: String usate solo come buffer temporanei
 // ---------------------------------------------------------------------------
 bool fetchICS() {
   resetCal();
@@ -128,10 +142,12 @@ bool fetchICS() {
 
   while (idx < 3) {
     int b = body.indexOf("BEGIN:VEVENT", p);
-    if (b < 0) break;
+    if (b < 0)
+      break;
 
     int e = body.indexOf("END:VEVENT", b);
-    if (e < 0) break;
+    if (e < 0)
+      break;
 
     String blk = body.substring(b, e);
 
@@ -192,13 +208,10 @@ bool fetchICS() {
 // ---------------------------------------------------------------------------
 // pageCalendar
 // - mostra max 3 eventi di oggi in ordine di “prossimità” temporale
-// - all-day → delta 0, eventi passati spostati idealmente a fine giornata
-// - usa solo indici su cal[] per ridurre RAM extra
+// - usa solo indici su cal[] per ridurre RAM
 // ---------------------------------------------------------------------------
 void pageCalendar() {
-  drawHeader(
-    g_lang == "it" ? "Oggi"
-                   : "Today");
+  drawHeader(g_lang == "it" ? "Oggi" : "Today");
 
   // ---------------------------------------------------
   // Icona calendario (RLE)
@@ -207,15 +220,8 @@ void pageCalendar() {
   int iconX = 480 - ICON_MARGIN - CAL_ICON_WIDTH;
   int iconY = PAGE_Y - 5;
 
-
-
-  drawRLE(
-    iconX,
-    iconY,
-    CAL_ICON_WIDTH,
-    CAL_ICON_HEIGHT,
-    cal_icon,
-    sizeof(cal_icon) / sizeof(RLERun));
+  drawRLE(iconX, iconY, CAL_ICON_WIDTH, CAL_ICON_HEIGHT, cal_icon,
+          sizeof(cal_icon) / sizeof(RLERun));
 
   // ---------------------------------------------------
   // Numero del giorno centrato nell'icona (TextSize 3, sfondo bianco)
@@ -230,25 +236,23 @@ void pageCalendar() {
 
   // dimensione carattere
   gfx->setTextSize(3);
-  gfx->setTextColor(COL_BG, 0xFFFF);  // testo colore tema, sfondo bianco
+  gfx->setTextColor(COL_BG, COL_TEXT); // testo colore tema, sfondo bianco
 
   // centro dell'icona
   int iconCenterX = iconX + (CAL_ICON_WIDTH / 2);
   int iconCenterY = iconY + (CAL_ICON_HEIGHT / 2);
 
-  // width approssimato per textsize 3 (base char width ≈ 6px)
-  int textW = dayStr.length() * 18;  // 6px * 3
-  int textH = 24;                    // circa 8px * 3
+  int textW = dayStr.length() * 18; // 6px * 3
+  int textH = 24;                   // circa 8px * 3
 
   int textX = iconCenterX - (textW / 2);
-  int textY = iconCenterY - (textH / 2) + 4;  // leggero offset estetico
+  int textY = iconCenterY - (textH / 2) + 4;
 
   gfx->setCursor(textX, textY);
   gfx->print(dayStr);
 
   // reset dimensione testo
   gfx->setTextSize(TEXT_SCALE);
-
 
   int y = PAGE_Y;
 
@@ -267,7 +271,8 @@ void pageCalendar() {
       continue;
 
     long d = cal[i].allDay ? 0 : (long)difftime(cal[i].ts, now);
-    if (d < 0) d = 86400;
+    if (d < 0)
+      d = 86400;
 
     rows[n].idx = i;
     rows[n].ts = cal[i].ts;
@@ -277,11 +282,9 @@ void pageCalendar() {
   }
 
   if (!n) {
-    drawBoldMain(
-      PAGE_X,
-      y + CHAR_H,
-      (g_lang == "it" ? "Nessun evento" : "No events"),
-      TEXT_SCALE + 1);
+    drawBoldMain(PAGE_X, y + CHAR_H,
+                 (g_lang == "it" ? "Nessun evento" : "No events"),
+                 TEXT_SCALE + 1);
     return;
   }
 
@@ -296,7 +299,7 @@ void pageCalendar() {
   }
 
   for (uint8_t i = 0; i < n; i++) {
-    CalItem& ev = cal[rows[i].idx];
+    CalItem &ev = cal[rows[i].idx];
 
     drawBoldMain(PAGE_X, y, String(ev.summary), TEXT_SCALE + 1);
 
@@ -319,4 +322,3 @@ void pageCalendar() {
       break;
   }
 }
-

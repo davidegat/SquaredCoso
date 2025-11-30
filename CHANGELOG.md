@@ -1,5 +1,23 @@
 # Changelog – SquaredCoso
 
+## [1.2.0] – 2025-12-01
+
+### Added
+* Tons of info (separate file) on configuration and troubleshooting.
+* Multipage touch menu for configuration.
+
+### Changed
+* Improved resourse usage for most pages.
+* Earth drawing.
+* Chronos, Clock and Bitcoin layout.
+* Lighter RLE images.
+
+### Fixed
+* Critical error on Calendar page.
+* Moon Phase behaviour.
+* Stellar page logic.
+--
+
 ## [1.1.0] – 2025-11-27
 
 ### Added

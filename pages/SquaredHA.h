@@ -1,337 +1,436 @@
-#pragma once
 /*
 ===============================================================================
-   SQUARED — HOME ASSISTANT PAGE (IP + TOKEN)
-   - Filtra solo entità utili
-   - Friendly name max 3 parole
-   - Batterie marcate "(Batt.)"
-   - SUN eliminato in qualsiasi forma (ID, friendly, device_class)
-   - Badge solo ON/OFF (verde scuro OFF, verde chiaro ON)
-   - Temp/Umidità → nessun badge
-   - Max 17 entità
-   - Aggiornamento LIVE ogni 1s
+   SQUARED — PAGINA "HOME ASSISTANT"
+   Descrizione: Scansione entità HA via API, filtro intelligente (no sun,
+                battery/temp/humidity, on/off), parsing compatto JSON senza
+                allocazioni inutili, rendering ottimizzato fino a 17 entità.
+   Autore: Davide “gat” Nasato
+   Repository: https://github.com/davidegat/SquaredCoso
+   Licenza: CC BY-NC 4.0
 ===============================================================================
 */
 
+#pragma once
+
 #include <Arduino.h>
 #include <Arduino_GFX_Library.h>
-#include <WiFi.h>
 #include <ESPmDNS.h>
 #include <HTTPClient.h>
-#include <vector>
+#include <WiFi.h>
 
 #include "../handlers/globals.h"
 
 // ============================================================================
 // EXTERN
 // ============================================================================
-extern Arduino_RGB_Display* gfx;
+extern Arduino_RGB_Display *gfx;
 extern const uint16_t COL_BG, COL_TEXT, COL_ACCENT1, COL_DIVIDER;
 extern const int PAGE_X, PAGE_Y, PAGE_W, PAGE_H;
 extern const int BASE_CHAR_W, BASE_CHAR_H, TEXT_SCALE;
-extern String sanitizeText(const String& in);
+extern void drawHLine(int y);
 
 // ============================================================================
-// PROTOTIPI
+// COSTANTI
 // ============================================================================
-bool fetchHA();
-void pageHA();
-void tickHA();
+static constexpr uint8_t HA_MAX_ENTRIES = 17;
+static constexpr uint8_t HA_NAME_LEN = 28;  // era 32
+static constexpr uint8_t HA_STATE_LEN = 10; // era 12
+static constexpr uint16_t HA_OFF_COL = 0x03E0;
+static constexpr uint16_t HA_ON_COL = 0x07E0;
 
-// ============================================================================
-// STRUTTURA
-// ============================================================================
 struct HAEntry {
-  String name;     // friendly
-  String state;    // stato normalizzato
-  bool isBattery;  // battery flag
-  bool isOnOff;    // on/off → badge
-  bool isTempHum;  // temperatura/umidità
+  char name[HA_NAME_LEN];
+  char state[HA_STATE_LEN];
+  uint8_t flags;
 };
 
-static bool ha_ready = false;
-static String ha_ip;
-static std::vector<HAEntry> ha_entries;
+// Flag bits
+static constexpr uint8_t HA_F_BATT = 0x01;
+static constexpr uint8_t HA_F_ONOFF = 0x02;
+static constexpr uint8_t HA_F_TEMPH = 0x04;
 
-// colori badge
-static const uint16_t HA_OFF_COLOR = 0x03E0;
-static const uint16_t HA_ON_COLOR  = 0x07E0;
-
-// refresh locale
+// ============================================================================
+// STATO GLOBALE
+// ============================================================================
+static HAEntry ha_entries[HA_MAX_ENTRIES];
+static uint8_t ha_count = 0;
 static uint32_t ha_nextPollMs = 0;
-static bool ha_dirty = true;
+static char ha_ip[16];
 
+// Bitfield per flag globali
+static struct {
+  uint8_t ready : 1;
+  uint8_t dirty : 1;
+  uint8_t reserved : 6;
+} ha_flags = {0, 1, 0};
 
 // ============================================================================
-// HELPERS LEGGERI
+// HELPERS
 // ============================================================================
-static bool isBatteryId(const String& id) {
-  String s = id; s.toLowerCase();
-  return (s.indexOf("battery") >= 0 ||
-          s.indexOf("batteria") >= 0 ||
-          s.endsWith("_bat"));
-}
 
-static bool isBatteryState(String s) {
-  s.toLowerCase();
-  return (s == "low" || s == "medium" || s == "middle" || s == "high");
-}
+// Case-insensitive search
+static bool hasCI(const char *hay, const char *needle) {
+  if (!hay || !needle)
+    return false;
 
-static bool isTempHum(const String& id) {
-  if (!id.startsWith("sensor.")) return false;
-  String s = id; s.toLowerCase();
-  return (s.indexOf("temperature") >= 0 ||
-          s.indexOf("temperatura") >= 0 ||
-          s.indexOf("humidity") >= 0 ||
-          s.indexOf("umid") >= 0);
-}
+  const uint8_t nlen = strlen(needle);
+  const uint8_t hlen = strlen(hay);
+  if (nlen > hlen)
+    return false;
 
-// friendly → max 3 parole
-static void trimName(String& s) {
-  int sp = 0;
-  for (int i = 0; i < s.length(); i++) {
-    if (s[i] == ' ') {
-      sp++;
-      if (sp >= 3) {
-        s = s.substring(0, i);
-        return;
-      }
-    }
+  for (uint8_t i = 0; i <= hlen - nlen; i++) {
+    uint8_t j = 0;
+    while (j < nlen && tolower(hay[i + j]) == tolower(needle[j]))
+      j++;
+    if (j == nlen)
+      return true;
   }
+  return false;
 }
 
-// normalizza stato
-static String normState(const String& raw) {
-  String s = raw;
-
-  if (s == "low")    return "Low";
-  if (s == "high")   return "High";
-  if (s == "medium") return "Middle";
-  if (s == "middle") return "Middle";
-
-  bool num = (s.length() > 0);
-  for (int i = 0; i < s.length() && num; i++)
-    if (!isdigit(s[i])) num = false;
-  if (num) return s + "%";
-
-  if (s.length()) s[0] = toupper(s[0]);
-  return s;
+static inline bool hasCI(const String &s, const char *needle) {
+  return hasCI(s.c_str(), needle);
 }
 
+static bool isBattId(const char *id) {
+  return hasCI(id, "battery") || hasCI(id, "batteria") ||
+         strstr(id, "_bat") != nullptr;
+}
 
-// ============================================================================
-// FILTRO ENTITÀ (ESCLUDE TUTTO CIÒ CHE È SUN)
-// ============================================================================
-static bool allowEntity(const String& id, const String& fname) {
+static bool isBattState(const char *s) {
+  if (!s || strlen(s) > 6)
+    return false;
 
-  // escludi tutto ciò che contiene "sun" ovunque
-  {
-    String sid = id;     sid.toLowerCase();
-    String sfn = fname;  sfn.toLowerCase();
+  char low[8];
+  for (uint8_t i = 0; s[i] && i < 7; i++)
+    low[i] = tolower(s[i]);
+  low[strlen(s)] = 0;
 
-    if (sid.indexOf("sun") >= 0) return false;
-    if (sfn.indexOf("sun") >= 0) return false;
+  return strcmp(low, "low") == 0 || strcmp(low, "high") == 0 ||
+         strcmp(low, "medium") == 0 || strcmp(low, "middle") == 0;
+}
+
+static bool isTempHum(const char *id) {
+  if (strncmp(id, "sensor.", 7) != 0)
+    return false;
+  return hasCI(id, "temperature") || hasCI(id, "temperatura") ||
+         hasCI(id, "humidity") || hasCI(id, "umid");
+}
+
+// Copia troncata a max 3 parole
+static void copyTrim3(char *dest, uint8_t destSize, const char *src) {
+  uint8_t di = 0, spaces = 0;
+
+  while (*src && di < destSize - 1) {
+    if (*src == ' ' && ++spaces >= 3)
+      break;
+    dest[di++] = *src++;
+  }
+  dest[di] = 0;
+}
+
+// Normalizza stato in buffer
+static void normState(char *dest, uint8_t destSize, const char *raw) {
+  uint8_t len = strlen(raw);
+
+  // Stati speciali (PROGMEM)
+  if (strcasecmp(raw, "low") == 0) {
+    strcpy_P(dest, PSTR("Low"));
+    return;
+  }
+  if (strcasecmp(raw, "high") == 0) {
+    strcpy_P(dest, PSTR("High"));
+    return;
+  }
+  if (strcasecmp(raw, "medium") == 0 || strcasecmp(raw, "middle") == 0) {
+    strcpy_P(dest, PSTR("Middle"));
+    return;
   }
 
-  if (id.startsWith("light."))  return true;
-  if (id.startsWith("switch.")) return true;
+  bool allNum = (len > 0);
+  for (uint8_t i = 0; i < len && allNum; i++) {
+    if (!isdigit(raw[i]))
+      allNum = false;
+  }
 
-  if (id.indexOf("_plug")   >= 0) return true;
-  if (id.indexOf("_outlet") >= 0) return true;
+  if (allNum && len < destSize - 2) {
+    strcpy(dest, raw);
+    dest[len] = '%';
+    dest[len + 1] = 0;
+    return;
+  }
 
-  if (id.startsWith("binary_sensor.") &&
-      id.indexOf("movimento") >= 0)
+  // Copia con prima maiuscola
+  if (len >= destSize)
+    len = destSize - 1;
+  dest[0] = toupper(raw[0]);
+  memcpy(dest + 1, raw + 1, len - 1);
+  dest[len] = 0;
+}
+
+// ============================================================================
+// FILTRO ENTITÀ
+// ============================================================================
+static bool allowEnt(const char *id, const char *fname) {
+  // Escludi sun
+  if (hasCI(id, "sun") || hasCI(fname, "sun"))
+    return false;
+
+  // Prefissi permessi
+  if (strncmp(id, "light.", 6) == 0)
+    return true;
+  if (strncmp(id, "switch.", 7) == 0)
     return true;
 
-  if (isBatteryId(id)) return true;
-  if (isTempHum(id))   return true;
+  // Plug/outlet
+  if (strstr(id, "_plug") || strstr(id, "_outlet"))
+    return true;
+
+  // Binary sensor movimento
+  if (strncmp(id, "binary_sensor.", 14) == 0 && hasCI(id, "movimento"))
+    return true;
+
+  // Battery o Temp/Humidity
+  if (isBattId(id))
+    return true;
+  if (isTempHum(id))
+    return true;
 
   return false;
 }
 
-
 // ============================================================================
 // DISCOVERY
 // ============================================================================
-static String discoverHA() {
-  int n = MDNS.queryService("_home-assistant", "_tcp");
-  return (n > 0 ? MDNS.IP(0).toString() : "");
+static bool discoverHA() {
+  int8_t n = MDNS.queryService("_home-assistant", "_tcp");
+  if (n > 0) {
+    IPAddress ip = MDNS.IP(0);
+    snprintf_P(ha_ip, sizeof(ha_ip), PSTR("%d.%d.%d.%d"), ip[0], ip[1], ip[2],
+               ip[3]);
+    return true;
+  }
+  ha_ip[0] = 0;
+  return false;
 }
 
+// ============================================================================
+// JSON PARSING
+// ============================================================================
+static int16_t extractJson(const String &body, int16_t start, const char *key,
+                           char *dest, uint8_t destSize) {
+  int16_t p = body.indexOf(key, start);
+  if (p < 0)
+    return -1;
+
+  int16_t q1 = body.indexOf('"', p + strlen(key));
+  if (q1 < 0)
+    return -1;
+
+  int16_t q2 = body.indexOf('"', q1 + 1);
+  if (q2 < 0)
+    return -1;
+
+  uint8_t len = q2 - q1 - 1;
+  if (len >= destSize)
+    len = destSize - 1;
+
+  const char *src = body.c_str() + q1 + 1;
+  memcpy(dest, src, len);
+  dest[len] = 0;
+
+  return q2 + 1;
+}
 
 // ============================================================================
 // FETCH STATI
 // ============================================================================
 static bool fetchHAStates() {
+  ha_count = 0;
+  ha_flags.ready = 0;
 
-  ha_entries.clear();
-  ha_entries.reserve(15);
-  ha_ready = false;
+  if (g_ha_token.length() == 0)
+    return false;
 
-  if (!g_ha_token.length()) return false;
+  // IP
+  if (g_ha_ip.length() > 0) {
+    strncpy(ha_ip, g_ha_ip.c_str(), sizeof(ha_ip) - 1);
+    ha_ip[sizeof(ha_ip) - 1] = 0;
+  } else if (!discoverHA()) {
+    return false;
+  }
 
-  ha_ip = g_ha_ip.length() ? g_ha_ip : discoverHA();
-  if (!ha_ip.length()) return false;
+  if (ha_ip[0] == 0)
+    return false;
 
+  // HTTP
   HTTPClient http;
   http.setTimeout(3000);
+  http.setReuse(false);
 
-  http.begin("http://" + ha_ip + ":8123/api/states");
-  http.addHeader("Authorization", "Bearer " + g_ha_token);
+  char url[48];
+  snprintf_P(url, sizeof(url), PSTR("http://%s:8123/api/states"), ha_ip);
 
-  int code = http.GET();
+  http.begin(url);
+
+  String authHeader = F("Bearer ");
+  authHeader += g_ha_token;
+  http.addHeader(F("Authorization"), authHeader);
+
+  int16_t code = http.GET();
+  if (code != 200) {
+    http.end();
+    return false;
+  }
+
   String body = http.getString();
   http.end();
 
-  if (code != 200 || body.length() < 30) return false;
+  if (body.length() < 30)
+    return false;
 
-  int pos = 0;
+  // Buffer parsing
+  char idBuf[48];
+  char stateBuf[24];
+  char fnameBuf[48];
 
-  while (true) {
+  int16_t pos = 0;
 
-    if (ha_entries.size() >= 20) break;
+  while (ha_count < HA_MAX_ENTRIES) {
+    pos = extractJson(body, pos, "\"entity_id\"", idBuf, sizeof(idBuf));
+    if (pos < 0)
+      break;
 
-    int p = body.indexOf("\"entity_id\"", pos);
-    if (p < 0) break;
+    int16_t statePos =
+        extractJson(body, pos, "\"state\"", stateBuf, sizeof(stateBuf));
+    if (statePos < 0)
+      continue;
 
-    int a = body.indexOf('"', p + 12);
-    int b = body.indexOf('"', a + 1);
-    if (a < 0 || b < 0) break;
+    // Skip invalidi
+    if (strcmp(stateBuf, "unknown") == 0 ||
+        strcmp(stateBuf, "unavailable") == 0) {
+      pos = statePos;
+      continue;
+    }
 
-    String id = body.substring(a + 1, b);
-    pos = b + 1;
+    // Friendly name
+    strcpy(fnameBuf, idBuf);
 
-    // --- STATE ---
-    int sKey = body.indexOf("\"state\"", b);
-    if (sKey < 0) continue;
+    int16_t attrPos = body.indexOf(F("\"attributes\""), statePos);
+    if (attrPos > 0 && attrPos < statePos + 500) {
+      extractJson(body, attrPos, "\"friendly_name\"", fnameBuf,
+                  sizeof(fnameBuf));
+    }
 
-    int s0 = body.indexOf('"', sKey + 7);
-    int s1 = body.indexOf('"', s0 + 1);
-    if (s0 < 0 || s1 < 0) continue;
+    // Filtro
+    if (!allowEnt(idBuf, fnameBuf)) {
+      pos = statePos;
+      continue;
+    }
 
-    String rawState = sanitizeText(body.substring(s0 + 1, s1));
-    if (rawState == "unknown" || rawState == "unavailable") continue;
+    // Entry
+    HAEntry &e = ha_entries[ha_count];
+    e.flags = 0;
 
-    // --- FRIENDLY NAME ---
-    String fname = id;
-    int attrPos = body.indexOf("\"attributes\"", s1);
-    if (attrPos > 0) {
-      int fn = body.indexOf("\"friendly_name\"", attrPos);
-      if (fn > 0) {
-        int f0 = body.indexOf('"', fn + 16);
-        int f1 = body.indexOf('"', f0 + 1);
-        if (f0 > 0 && f1 > f0)
-          fname = sanitizeText(body.substring(f0 + 1, f1));
+    // Battery
+    if (isBattId(idBuf) || isBattState(stateBuf)) {
+      e.flags |= HA_F_BATT;
+      // Aggiungi suffisso
+      uint8_t flen = strlen(fnameBuf);
+      if (flen < sizeof(fnameBuf) - 8) {
+        strcpy_P(fnameBuf + flen, PSTR(" (Batt)"));
       }
     }
 
-    // filtro completo (ID + friendly)
-    if (!allowEntity(id, fname)) continue;
+    // Temp/Hum
+    if (isTempHum(idBuf))
+      e.flags |= HA_F_TEMPH;
 
-    bool isBatt = isBatteryId(id);
-    if (isBatteryState(rawState)) isBatt = true;
+    // On/Off
+    if (strcasecmp(stateBuf, "on") == 0 || strcasecmp(stateBuf, "off") == 0) {
+      e.flags |= HA_F_ONOFF;
+    }
 
-    if (isBatt) fname += " (Batt.)";
-    trimName(fname);
+    copyTrim3(e.name, HA_NAME_LEN, fnameBuf);
+    normState(e.state, HA_STATE_LEN, stateBuf);
 
-    bool isOnOff = (rawState == "on" || rawState == "off");
-    bool isTH    = isTempHum(id);
-
-    // aggiungi entry
-    HAEntry e;
-    e.name      = fname;
-    e.state     = normState(rawState);
-    e.isBattery = isBatt;
-    e.isOnOff   = isOnOff;
-    e.isTempHum = isTH;
-    ha_entries.push_back(e);
+    ha_count++;
+    pos = statePos;
   }
 
-  ha_ready = true;
-  ha_dirty = true;
+  ha_flags.ready = 1;
+  ha_flags.dirty = 1;
   return true;
 }
 
-
 // ============================================================================
-// AUTO-REFRESH (1s)
+// TICK
 // ============================================================================
-static void autoRefresh() {
+void tickHA() {
   uint32_t now = millis();
   if (now >= ha_nextPollMs) {
     ha_nextPollMs = now + 1000;
-    if (fetchHAStates()) ha_dirty = true;
+    if (fetchHAStates())
+      ha_flags.dirty = 1;
   }
 }
 
-void tickHA() {
-  autoRefresh();
-}
-
-
 // ============================================================================
-// DRAW BADGE
-// ============================================================================
-static void drawBadge(int x, int y, uint16_t col) {
-  gfx->fillRoundRect(x, y, 32, BASE_CHAR_H * TEXT_SCALE, 4, col);
-}
-
-
-// ============================================================================
-// RENDER PAGINA
+// RENDER
 // ============================================================================
 void pageHA() {
-
-  if (!ha_ready) {
+  if (!ha_flags.ready) {
     gfx->setCursor(PAGE_X, PAGE_Y + 20);
-    gfx->print("Ricerca...");
+    gfx->print(F("Ricerca..."));
     return;
   }
 
-  if (!ha_dirty) return;
-  ha_dirty = false;
+  if (!ha_flags.dirty)
+    return;
+  ha_flags.dirty = 0;
 
   gfx->setTextSize(TEXT_SCALE);
   gfx->setTextColor(COL_TEXT, COL_BG);
 
-  int y = PAGE_Y - 40;
+  const int16_t lineH = BASE_CHAR_H * TEXT_SCALE;
+  const int16_t rowStep = lineH + 7;
+  const int16_t yMax = PAGE_Y + PAGE_H - 20;
+  int16_t y = PAGE_Y - 40;
 
-  if (ha_entries.empty()) {
+  if (ha_count == 0) {
     gfx->setCursor(PAGE_X, y);
-    gfx->print("Nessuna entita'");
+    gfx->print(F("Nessuna entita'"));
     return;
   }
 
-  for (auto &e : ha_entries) {
-
-    if (y > PAGE_Y + PAGE_H - 20) break;
+  for (uint8_t i = 0; i < ha_count && y <= yMax; i++) {
+    const HAEntry &e = ha_entries[i];
 
     gfx->setCursor(PAGE_X, y);
     gfx->print(e.name);
 
-    if (e.isOnOff) {
-      uint16_t col = (e.state == "On" ? HA_ON_COLOR : HA_OFF_COLOR);
-      drawBadge(PAGE_X + PAGE_W - 40, y - 2, col);
+    if (e.flags & HA_F_ONOFF) {
+      // Check secondo carattere: 'n' = On, 'f' = Off
+      uint16_t col = (e.state[1] == 'n') ? HA_ON_COL : HA_OFF_COL;
+      gfx->fillRoundRect(PAGE_X + PAGE_W - 40, y - 2, 32, lineH, 4, col);
     } else {
-      int tw = e.state.length() * BASE_CHAR_W * TEXT_SCALE;
+      int16_t tw = strlen(e.state) * BASE_CHAR_W * TEXT_SCALE;
       gfx->setCursor(PAGE_X + PAGE_W - tw, y);
       gfx->print(e.state);
     }
 
-    y += BASE_CHAR_H * TEXT_SCALE + 10;
+    y += lineH + 10;
     drawHLine(y - 4);
-    y += BASE_CHAR_H * TEXT_SCALE + -13;
+    y -= 3;
   }
 }
-
 
 // ============================================================================
 // WRAPPER
 // ============================================================================
 bool fetchHA() {
-  ha_ready = false;
+  ha_flags.ready = 0;
+  ha_flags.dirty = 1;
   ha_nextPollMs = 0;
-  ha_dirty = true;
   return fetchHAStates();
 }
-

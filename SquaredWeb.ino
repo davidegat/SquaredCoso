@@ -1,20 +1,36 @@
 /*
 ===============================================================================
-  SquaredCoso – Captive Portal & WebUI (versione riorganizzata / modernizzata)
+   SQUARED — CAPTIVE PORTAL & WEBUI
+   Modulo principale per:
+     • modalità AP con Captive Portal (Wi-Fi setup iniziale)
+     • modalità STA con dashboard e pagina impostazioni
+     • routing HTTP completo (AP/STA)
+     • salvataggio credenziali Wi-Fi via NVS
+     • form di configurazione (meteo, lingue, pagine, API, QOD, BTC,
+       Home Assistant, RSS, countdown, post-it)
+
+   Funzionalità incluse:
+     – DNS hijack per captive portal
+     – web server responsivo con tema moderno neon-dark
+     – generazione HTML dinamica lato ESP32-S3
+     – integrazione con Preferences, globali e scheduler
+
+   Autore: Davide “gat” Nasato
+   Repository: https://github.com/davidegat/SquaredCoso
+   Licenza: CC BY-NC 4.0
 ===============================================================================
 */
+
 
 #include <WiFi.h>
 #include <WebServer.h>
 #include <HTTPClient.h>
 #include <DNSServer.h>
 #include <Preferences.h>
-#include "handlers/globals.h"  // per sanitizeText, P_*, CDEvent, PAGES
+#include "handlers/globals.h"
+
 #define DNS_PORT 53
 
-// ---------------------------------------------------------------------------
-// EXTERN dal core
-// ---------------------------------------------------------------------------
 extern WebServer web;
 extern DNSServer dnsServer;
 extern Preferences prefs;
@@ -228,45 +244,45 @@ String htmlSettings(bool saved, const String& msg) {
   uint32_t page_s = PAGE_INTERVAL_MS / 1000;
 
   // Nomi pagine
-static const char* names_it[PAGES] = {
-  "Meteo",
-  "Aria",
-  "Orologio",
-  "Orologio Binario",
-  "Calendario ICS",
-  "Bitcoin",
-  "Frase del giorno",
-  "Info",
-  "Countdown",
-  "Valute",
-  "Temp 7 giorni",
-  "Ore di luce",
-  "News",
-  "Home Assistant",
-  "Sistema Solare",
-  "Post-it",
-  "Chronos"
-};
+  static const char* names_it[PAGES] = {
+    "Meteo",
+    "Aria",
+    "Orologio",
+    "Orologio Binario",
+    "Calendario ICS",
+    "Bitcoin",
+    "Frase del giorno",
+    "Info",
+    "Countdown",
+    "Valute",
+    "Temp 7 giorni",
+    "Ore di luce",
+    "News",
+    "Home Assistant",
+    "Sistema Solare",
+    "Post-it",
+    "Chronos"
+  };
 
-static const char* names_en[PAGES] = {
-  "Weather",
-  "Air",
-  "Clock",
-  "Binary Clock",
-  "Calendar",
-  "Bitcoin",
-  "Quote of the Day",
-  "Info",
-  "Countdown",
-  "FX",
-  "T24",
-  "Sunlight",
-  "News",
-  "Home Assistant",
-  "Solar System",
-  "Sticky Note",
-  "Chronos"
-};
+  static const char* names_en[PAGES] = {
+    "Weather",
+    "Air",
+    "Clock",
+    "Binary Clock",
+    "Calendar",
+    "Bitcoin",
+    "Quote of the Day",
+    "Info",
+    "Countdown",
+    "FX",
+    "Temp 7 days",
+    "Sunlight",
+    "News",
+    "Home Assistant",
+    "Solar System",
+    "Sticky Note",
+    "Chronos"
+  };
 
   const char** names = it ? names_it : names_en;
 
@@ -484,7 +500,7 @@ static const char* names_en[PAGES] = {
 
   page += "<p class='desc' style='font-size:.8rem;color:#a9afff;margin-top:6px;'>";
   page += (it ? "Lascia vuoto per cancellare il post-it."
-              : "Leave empty to remove the sticky note.");
+              : "Leave empty to remove sticky note.");
   page += "</p>";
 
   page += "</div>";  // fine card Post-it
@@ -550,43 +566,43 @@ static String htmlHome() {
 
   // --------- Nomi pagine (it/en) --------
   static const char* names_it[PAGES] = {
-    "Meteo",          // 0
-    "Aria",           // 1
-    "Orologio",       // 2
-    "Orologio Binario",//3
-    "Calendario ICS", // 4
-    "Bitcoin",        // 5
-    "Frase del giorno",//6
-    "Info",           // 7
-    "Countdown",      // 8
-    "Valute",         // 9
-    "T24",            // 10
-    "Ore di luce",    // 11
-    "News",           // 12
-    "Home Assistant", // 13
-    "Sistema Solare", // 14
-    "Post-it",        // 15
-    "Chronos"         // 16
+    "Meteo",             // 0
+    "Aria",              // 1
+    "Orologio",          // 2
+    "Orologio Binario",  //3
+    "Calendario ICS",    // 4
+    "Bitcoin",           // 5
+    "Frase del giorno",  //6
+    "Info",              // 7
+    "Countdown",         // 8
+    "Valute",            // 9
+    "T24",               // 10
+    "Ore di luce",       // 11
+    "News",              // 12
+    "Home Assistant",    // 13
+    "Sistema Solare",    // 14
+    "Post-it",           // 15
+    "Chronos"            // 16
   };
 
   static const char* names_en[PAGES] = {
-    "Weather",        // 0
-    "Air",            // 1
-    "Clock",          // 2
-    "Binary Clock",   // 3
-    "Calendar",       // 4
-    "Bitcoin",        // 5
-    "Quote of the Day",//6
-    "Info",           // 7
-    "Countdown",      // 8
-    "FX",             // 9
-    "T24",            // 10
-    "Sunlight",       // 11
-    "News",           // 12
-    "Home Assistant", // 13
-    "Solar System",   // 14
-    "Sticky Note",    // 15
-    "Chronos"         // 16
+    "Weather",           // 0
+    "Air",               // 1
+    "Clock",             // 2
+    "Binary Clock",      // 3
+    "Calendar",          // 4
+    "Bitcoin",           // 5
+    "Quote of the Day",  //6
+    "Info",              // 7
+    "Countdown",         // 8
+    "FX",                // 9
+    "T24",               // 10
+    "Sunlight",          // 11
+    "News",              // 12
+    "Home Assistant",    // 13
+    "Solar System",      // 14
+    "Sticky Note",       // 15
+    "Chronos"            // 16
   };
 
   const char** names = it ? names_it : names_en;
@@ -628,63 +644,57 @@ static String htmlHome() {
   page += "<!doctype html><html><head>"
           "<meta charset='utf-8'/>"
           "<meta name='viewport' content='width=device-width,initial-scale=1'/>"
-          "<title>" + String(t_title) + "</title>"
-          "<style>"
-          "body{margin:0;font-family:-apple-system,BlinkMacSystemFont,system-ui,sans-serif;"
-          "background:#050814;color:#f5f5f7;}"
-          "main{max-width:720px;margin:0 auto;padding:18px 14px 32px;}"
-          "h1{margin:0 0 8px;font-size:1.4rem;color:#ffdf40;}"
-          "p{margin:4px 0;font-size:.9rem;color:#d8ddff;}"
-          ".card{background:#0b1020;border-radius:16px;border:1px solid #191f3b;"
-          "padding:14px 16px;margin-top:12px;box-shadow:0 10px 26px rgba(0,0,0,.45);}"
-          ".label{font-size:.78rem;color:#9ca2ff;text-transform:uppercase;letter-spacing:.06em;}"
-          ".value{font-size:.95rem;}"
-          "a{color:#ffdf40;text-decoration:none;font-weight:500;}"
-          "a:hover{text-decoration:underline;}"
-          ".kv{margin:2px 0;}"
-          ".kv b{display:inline-block;min-width:130px;}"
-          "</style></head><body><main>";
+          "<title>"
+          + String(t_title) + "</title>"
+                              "<style>"
+                              "body{margin:0;font-family:-apple-system,BlinkMacSystemFont,system-ui,sans-serif;"
+                              "background:#050814;color:#f5f5f7;}"
+                              "main{max-width:720px;margin:0 auto;padding:18px 14px 32px;}"
+                              "h1{margin:0 0 8px;font-size:1.4rem;color:#ffdf40;}"
+                              "p{margin:4px 0;font-size:.9rem;color:#d8ddff;}"
+                              ".card{background:#0b1020;border-radius:16px;border:1px solid #191f3b;"
+                              "padding:14px 16px;margin-top:12px;box-shadow:0 10px 26px rgba(0,0,0,.45);}"
+                              ".label{font-size:.78rem;color:#9ca2ff;text-transform:uppercase;letter-spacing:.06em;}"
+                              ".value{font-size:.95rem;}"
+                              "a{color:#ffdf40;text-decoration:none;font-weight:500;}"
+                              "a:hover{text-decoration:underline;}"
+                              ".kv{margin:2px 0;}"
+                              ".kv b{display:inline-block;min-width:130px;}"
+                              "</style></head><body><main>";
 
   page += "<h1>" + String(t_title) + "</h1>";
 
   // ------------------------------------------------------------------
   // CARD 1 — PROFILO PANNELLO
   // ------------------------------------------------------------------
-  page += "<div class='card'><div class='label'>" + String(t_profile) +
-          "</div><p class='value'>";
+  page += "<div class='card'><div class='label'>" + String(t_profile) + "</div><p class='value'>";
 
   page += "<div class='kv'><b>" + String(t_city) + ":</b> " + sanitizeText(g_city) + "</div>";
   page += "<div class='kv'><b>" + String(t_lang_label) + ":</b> " + sanitizeText(g_lang) + "</div>";
   page += "<div class='kv'><b>" + String(t_fiat) + ":</b> " + sanitizeText(g_fiat) + "</div>";
-  page += "<div class='kv'><b>" + String(t_ics) + ":</b> " +
-          (g_ics.length() ? sanitizeText(g_ics) : String("-")) + "</div>";
+  page += "<div class='kv'><b>" + String(t_ics) + ":</b> " + (g_ics.length() ? sanitizeText(g_ics) : String("-")) + "</div>";
 
   page += "</p></div>";
 
   // ------------------------------------------------------------------
   // CARD 2 — ROTAZIONE PAGINE
   // ------------------------------------------------------------------
-  page += "<div class='card'><div class='label'>" + String(t_pages_card) +
-          "</div><p class='value'>";
+  page += "<div class='card'><div class='label'>" + String(t_pages_card) + "</div><p class='value'>";
 
   page += "<div class='kv'><b>" + String(t_pages_int) + ":</b> " + String(s) + " s</div>";
 
-  page += "<div class='kv'><b>" + String(t_pages_on) + ":</b> " +
-          (enabledList.length() ? enabledList : String("-")) + "</div>";
+  page += "<div class='kv'><b>" + String(t_pages_on) + ":</b> " + (enabledList.length() ? enabledList : String("-")) + "</div>";
 
-  page += "<div class='kv'><b>" + String(t_pages_off) + ":</b> " +
-          (disabledList.length() ? disabledList : String("-")) + "</div>";
+  page += "<div class='kv'><b>" + String(t_pages_off) + ":</b> " + (disabledList.length() ? disabledList : String("-")) + "</div>";
 
-  page += "<div class='kv'><b>" + String(it ? "Totale pagine attive" : "Total active pages") +
-          ":</b> " + String(enabledCount) + " / " + String(PAGES) + "</div>";
+  page += "<div class='kv'><b>" + String(it ? "Totale pagine attive" : "Total active pages") + ":</b> " + String(enabledCount) + " / " + String(PAGES) + "</div>";
 
   page += "</p></div>";
 
   // ------------------------------------------------------------------
   // CARD 3 — DATI & INTEGRAZIONI
   // ------------------------------------------------------------------
-  page += "<div class='card'><div class='label'>" + String(t_data) +
-          "</div><p class='value'>";
+  page += "<div class='card'><div class='label'>" + String(t_data) + "</div><p class='value'>";
 
   // QOD
   page += "<div class='kv'><b>" + String(t_qod_label) + ":</b> ";
@@ -703,16 +713,13 @@ static String htmlHome() {
   page += "</div>";
 
   // RSS
-  page += "<div class='kv'><b>" + String(t_rss_label) + ":</b> " +
-          (g_rss_url.length() ? sanitizeText(g_rss_url) : String("-")) + "</div>";
+  page += "<div class='kv'><b>" + String(t_rss_label) + ":</b> " + (g_rss_url.length() ? sanitizeText(g_rss_url) : String("-")) + "</div>";
 
   // HA
   page += "<div class='kv'><b>" + String(t_ha_label) + ":</b> ";
   if (g_ha_ip.length() || g_ha_token.length()) {
-    page += "<br/><b>" + String(t_ha_ip) + ":</b> " +
-            (g_ha_ip.length() ? sanitizeText(g_ha_ip) : String("-"));
-    page += "<br/><b>" + String(t_ha_token) + ":</b> " +
-            (g_ha_token.length() ? (it ? "impostato" : "set") : String(t_ha_missing));
+    page += "<br/><b>" + String(t_ha_ip) + ":</b> " + (g_ha_ip.length() ? sanitizeText(g_ha_ip) : String("-"));
+    page += "<br/><b>" + String(t_ha_token) + ":</b> " + (g_ha_token.length() ? (it ? "impostato" : "set") : String(t_ha_missing));
   } else {
     page += String(t_ha_missing);
   }
@@ -723,17 +730,14 @@ static String htmlHome() {
   // ------------------------------------------------------------------
   // CARD 4 — COUNTDOWN
   // ------------------------------------------------------------------
-  page += "<div class='card'><div class='label'>" + String(t_cd_card) +
-          "</div><p class='value'>";
+  page += "<div class='card'><div class='label'>" + String(t_cd_card) + "</div><p class='value'>";
 
   if (cdCount == 0) {
     page += t_cd_none;
   } else {
-    page += "<div class='kv'><b>" + String(t_cd_count) +
-            ":</b> " + String(cdCount) + " / 8</div>";
+    page += "<div class='kv'><b>" + String(t_cd_count) + ":</b> " + String(cdCount) + " / 8</div>";
 
-    page += "<div class='kv'><b>" + String(t_cd_list) + ":</b> " +
-            cdNames + "</div>";
+    page += "<div class='kv'><b>" + String(t_cd_list) + ":</b> " + cdNames + "</div>";
   }
 
   page += "</p></div>";
