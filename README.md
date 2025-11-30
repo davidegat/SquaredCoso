@@ -39,7 +39,7 @@ Il dispositivo può mostrare:
 * Orologio binario
 * Visualizzazioni temporali avanzate (Chronos)
 * Calendario ICS
-* Grafico temperatura 24h
+* Grafico temperatura 7 giorni
 * Ore di luce, twilight, UV e fase lunare
 * Bitcoin e variazione giornaliera
 * Cambi valutari
@@ -172,9 +172,9 @@ Conteggio del tempo rimanente di giorno, mese, anno e altre scadenze temporali.
 
 Mostra gli eventi della giornata dal feed ICS.
 
-### Temperatura 24h
+### Temperatura 
 
-Ricostruzione oraria tramite dati giornalieri Open-Meteo.
+Ricostruzione settimanale tramite dati giornalieri Open-Meteo.
 
 ### Ore di luce
 
@@ -347,7 +347,7 @@ The device can display:
 * Binary clock
 * Chronos advanced time views
 * ICS calendar
-* 24h temperature graph
+* 7 days temperature graph
 * Daylight, twilight, UV, moon phase
 * Bitcoin and daily change
 * FX rates
@@ -471,9 +471,9 @@ Counters for the remaining time in the day, month, year and other deadlines.
 
 Shows today's events from the configured ICS feed.
 
-### Temperature 24h
+### Temperature 
 
-Reconstructed hourly graph using Open‑Meteo daily data.
+Reconstructed weekly graph using Open‑Meteo daily data.
 
 ### Daylight
 
