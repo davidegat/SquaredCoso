@@ -23,7 +23,7 @@
 // FIRMWARE INFO
 // =============================================================================
 const char FW_NAME[] PROGMEM = "SquaredCoso";
-const char FW_VERSION[] PROGMEM = "b1.2.0";
+const char FW_VERSION[] PROGMEM = "b1.2.1";
 
 int indexOfCI(const String& src, const String& key, int from = 0);
 
@@ -253,7 +253,11 @@ static void drawAPScreenOnce(const String& ssid, const String& pass) {
   gfx->setCursor(16, 114);
   gfx->print(F("Captive portal automatico."));
   gfx->setCursor(16, 126);
-  gfx->print(F("Se non compare, apri l'IP dell'AP."));
+  gfx->print(F("Se non compare, apri:"));
+  gfx->setCursor(16, 138);
+  gfx->print(F("http://"));
+  gfx->print(WiFi.softAPIP());
+  gfx->print(F("/"));
   gfx->setTextSize(TEXT_SCALE);
 }
 
@@ -467,15 +471,21 @@ void setup() {
   gfx->print(verBuf);
 
   loadAppConfig();
-  touchInit();
 
+  // In AP mode the loop must immediately service DNS and the WebUI.  Do not
+  // initialize touch or start Internet data refreshes before entering loop().
   if (!tryConnectSTA(8000)) {
     startAPWithPortal();
-  } else {
-    startSTAWeb();
-    syncTimeFromNTP();
-    g_dataRefreshPending = true;
+    g_bootPhase = false;
+    return;
   }
+
+  // Touch is only used by the normal STA UI.  Delaying initialization also
+  // avoids TAMC_GT911 trying to toggle the unused -1 INT/RST pins in AP mode.
+  touchInit();
+  startSTAWeb();
+  syncTimeFromNTP();
+  g_dataRefreshPending = true;
 
   refreshAll();
   g_pageDirty[g_page] = true;
