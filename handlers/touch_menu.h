@@ -1,14 +1,3 @@
-/*
-===============================================================================
-   SQUARED — TOUCH HANDLER + PAGE MANAGER
-   Descrizione: Gestione touch GT911, mappatura coordinate,
-                overlay menu pagine, paginazione e pulsanti azione.
-   Autore: Davide “gat” Nasato
-   Repository: https://github.com/davidegat/SquaredCoso
-   Licenza: CC BY-NC 4.0
-===============================================================================
-*/
-
 #pragma once
 #include <Arduino.h>
 #include <TAMC_GT911.h>
@@ -29,9 +18,6 @@ extern Arduino_RGB_Display *gfx;
 extern const uint16_t COL_BG;
 extern const uint16_t COL_ACCENT2;
 
-// ============================================================================
-// PAGE LABELS BILINGUE
-// ============================================================================
 static const char *PAGE_LABELS_IT[PAGES] = {
     "Meteo", "Aria",    "Orologio",  "Binario", "Calendario", "Bitcoin",
     "Frase", "Info",    "Countdown", "Forex",   "Temp.7gg",   "Luce/Luna",
@@ -42,16 +28,10 @@ static const char *PAGE_LABELS_EN[PAGES] = {
     "Quote",   "Info",    "Countdown", "Forex",  "Temp.7d",  "Light/Moon",
     "News",    "HomeAss", "Stellar",   "Notes",  "Chronos"};
 
-// ============================================================================
-// FUNZIONE LABEL BILINGUE
-// ============================================================================
 static inline const char *pageLabel(int i) {
   return (g_lang == "en") ? PAGE_LABELS_EN[i] : PAGE_LABELS_IT[i];
 }
 
-// ---------------------------------------------------------------------------
-// COLORI TEMA SCURO
-// ---------------------------------------------------------------------------
 constexpr uint16_t MENU_BG = 0x0841;
 constexpr uint16_t MENU_CARD = 0x18C3;
 constexpr uint16_t MENU_BORDER = 0x2945;
@@ -61,15 +41,9 @@ constexpr uint16_t MENU_ACCENT = 0x07FF;
 constexpr uint16_t MENU_ON_BG = 0x0320;
 constexpr uint16_t MENU_ARROW_DIS = 0x1082;
 
-// ---------------------------------------------------------------------------
-// OGGETTO TOUCH
-// ---------------------------------------------------------------------------
 static TAMC_GT911 ts(TOUCH_SDA, TOUCH_SCL, TOUCH_INT, TOUCH_RST, TOUCH_WIDTH,
                      TOUCH_HEIGHT);
 
-// ---------------------------------------------------------------------------
-// STATO TOUCH
-// ---------------------------------------------------------------------------
 static struct {
   uint8_t ready : 1;
   uint8_t paused : 1;
@@ -84,16 +58,14 @@ static struct {
 static uint32_t lastTouchMs = 0;
 static uint8_t lastTouches = 0;
 
-// ---------------------------------------------------------------------------
-// PAGINAZIONE
-// ---------------------------------------------------------------------------
+// Edge zones are evaluated after rotation: left = previous, center = menu, right = next.
+static constexpr int16_t EDGE_TAP_W = 96;
+
 constexpr uint8_t ITEMS_PER_PAGE = 8;
 static uint8_t menuPage = 0;
 static uint8_t totalMenuPages = 1;
+static uint32_t menuOriginalMask = 0;
 
-// ---------------------------------------------------------------------------
-// LAYOUT (
-// ---------------------------------------------------------------------------
 constexpr int16_t M_MARGIN = 16;
 constexpr int16_t M_HEADER_H = 58;
 constexpr int16_t M_FOOTER_H = 82;
@@ -124,17 +96,11 @@ constexpr int16_t ACT_BTN_Y = ARROW_Y;
 constexpr int16_t BTN_CANCEL_X = ACT_AREA_X;
 constexpr int16_t BTN_OK_X = ACT_AREA_X + ACT_BTN_W + ACT_GAP;
 
-// ---------------------------------------------------------------------------
-// CACHE posizioni
-// ---------------------------------------------------------------------------
-static int16_t slotX[ITEMS_PER_PAGE];  // era int (32 → 16 byte)
-static int16_t slotY[ITEMS_PER_PAGE];  // era int (32 → 16 byte)
-static int8_t slotIdx[ITEMS_PER_PAGE]; // era int (32 → 8 byte)
-static uint8_t visibleCount = 0;       // era int (4 → 1 byte)
+static int16_t slotX[ITEMS_PER_PAGE];
+static int16_t slotY[ITEMS_PER_PAGE];
+static int8_t slotIdx[ITEMS_PER_PAGE];
+static uint8_t visibleCount = 0;
 
-// ---------------------------------------------------------------------------
-// Calcola pagine totali
-// ---------------------------------------------------------------------------
 static void calcMenuPages() {
   uint8_t n = (uint8_t)PAGES;
   totalMenuPages = (n + ITEMS_PER_PAGE - 1) / ITEMS_PER_PAGE;
@@ -142,11 +108,7 @@ static void calcMenuPages() {
     totalMenuPages = 1;
 }
 
-// ---------------------------------------------------------------------------
-// Disegna singolo bottone pagina
-// ---------------------------------------------------------------------------
-static void drawPageBtn(uint8_t slot, uint8_t pageIdx, int16_t x, int16_t y,
-                        bool isOn) {
+static void drawPageBtn(uint8_t pageIdx, int16_t x, int16_t y, bool isOn) {
   constexpr uint8_t R = 8;
 
   uint16_t bgCol = isOn ? MENU_ON_BG : MENU_CARD;
@@ -156,7 +118,6 @@ static void drawPageBtn(uint8_t slot, uint8_t pageIdx, int16_t x, int16_t y,
   gfx->fillRoundRect(x, y, M_BTN_W, M_BTN_H, R, bgCol);
   gfx->drawRoundRect(x, y, M_BTN_W, M_BTN_H, R, borderCol);
 
-  // Indicatore stato
   int16_t indX = x + M_BTN_W - 22;
   int16_t indY = y + M_BTN_H / 2;
   if (isOn) {
@@ -165,16 +126,12 @@ static void drawPageBtn(uint8_t slot, uint8_t pageIdx, int16_t x, int16_t y,
     gfx->drawCircle(indX, indY, 7, MENU_TEXT_DIM);
   }
 
-  // Label
   gfx->setTextSize(2);
   gfx->setTextColor(textCol);
   gfx->setCursor(x + 14, y + (M_BTN_H - 16) / 2);
   gfx->print(pageLabel(pageIdx));
 }
 
-// ---------------------------------------------------------------------------
-// Disegna freccia
-// ---------------------------------------------------------------------------
 static void drawArrowBtn(int16_t x, int16_t y, bool isLeft, bool enabled) {
   uint16_t bgCol = enabled ? MENU_CARD : MENU_ARROW_DIS;
   uint16_t borderCol = enabled ? MENU_ACCENT : MENU_BORDER;
@@ -196,9 +153,6 @@ static void drawArrowBtn(int16_t x, int16_t y, bool isLeft, bool enabled) {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Disegna pulsante azione
-// ---------------------------------------------------------------------------
 static void drawActionBtn(int16_t x, int16_t y,
                           const __FlashStringHelper *label, bool filled) {
   uint16_t bgCol = filled ? MENU_ACCENT : MENU_CARD;
@@ -211,7 +165,6 @@ static void drawActionBtn(int16_t x, int16_t y,
   gfx->setTextSize(2);
   gfx->setTextColor(textCol);
 
-  // Calcola larghezza stringa PROGMEM
   PGM_P p = reinterpret_cast<PGM_P>(label);
   uint8_t len = strlen_P(p);
   int16_t textW = len * 12;
@@ -222,9 +175,6 @@ static void drawActionBtn(int16_t x, int16_t y,
   gfx->print(label);
 }
 
-// ---------------------------------------------------------------------------
-// Header
-// ---------------------------------------------------------------------------
 static void drawMenuHeader() {
   gfx->fillRect(0, 0, 480, 3, MENU_ACCENT);
 
@@ -256,9 +206,6 @@ static void drawMenuHeader() {
   gfx->drawFastHLine(M_MARGIN, M_HEADER_H - 4, 480 - M_MARGIN * 2, MENU_BORDER);
 }
 
-// ---------------------------------------------------------------------------
-// Aggiorna contatore
-// ---------------------------------------------------------------------------
 static void updateMenuCounter() {
   gfx->fillRect(M_MARGIN, 38, 100, 14, MENU_BG);
   gfx->fillRect(400, 38, 70, 14, MENU_BG);
@@ -284,9 +231,6 @@ static void updateMenuCounter() {
   gfx->print(buf);
 }
 
-// ---------------------------------------------------------------------------
-// Disegna griglia
-// ---------------------------------------------------------------------------
 static void drawMenuGrid() {
   gfx->fillRect(0, M_HEADER_H, 480, M_GRID_H, MENU_BG);
 
@@ -308,7 +252,7 @@ static void drawMenuGrid() {
     slotY[slot] = y;
     slotIdx[slot] = i;
 
-    drawPageBtn(slot, i, x, y, g_show[i]);
+    drawPageBtn(i, x, y, g_show[i]);
     slot++;
   }
 
@@ -317,12 +261,10 @@ static void drawMenuGrid() {
   updateMenuCounter();
 }
 
-// ---------------------------------------------------------------------------
-// MENU COMPLETO
-// ---------------------------------------------------------------------------
 static void drawPauseOverlay() {
   calcMenuPages();
   menuPage = 0;
+  menuOriginalMask = pagesMaskFromArray();
 
   gfx->fillScreen(MENU_BG);
   drawMenuHeader();
@@ -331,17 +273,11 @@ static void drawPauseOverlay() {
   drawMenuGrid();
 }
 
-// ---------------------------------------------------------------------------
-// CLEAR overlay
-// ---------------------------------------------------------------------------
 static void clearPauseOverlay() {
   gfx->fillScreen(COL_BG);
   drawCurrentPage();
 }
 
-// ---------------------------------------------------------------------------
-// INIT TOUCH
-// ---------------------------------------------------------------------------
 static bool touchInit() {
   ts.begin();
   ts.setRotation(0);
@@ -350,103 +286,143 @@ static bool touchInit() {
   return true;
 }
 
-// ---------------------------------------------------------------------------
-// MAP COORDINATE
-// ---------------------------------------------------------------------------
 static inline void mapTouch(int16_t &x, int16_t &y) {
-  x = ts.points[0].y;
-  y = 480 - ts.points[0].x;
+  // Start from the panel canonical coordinates, then rotate into visual screen space.
+  int16_t bx = constrain((int16_t)ts.points[0].y, 0, 479);
+  int16_t by = constrain((int16_t)(479 - ts.points[0].x), 0, 479);
+
+  switch (g_rotation & 3) {
+    case 1: x = by;       y = 479 - bx; break;
+    case 2: x = 479 - bx; y = 479 - by; break;
+    case 3: x = 479 - by; y = bx;       break;
+    default: x = bx;      y = by;       break;
+  }
 }
 
-// ---------------------------------------------------------------------------
-// LOOP TOUCH
-// ---------------------------------------------------------------------------
+static bool stepConfiguredPage(int8_t dir) {
+  if (dir == 0)
+    return false;
+
+  int target = g_page;
+  for (uint8_t k = 0; k < (uint8_t)PAGES; k++) {
+    target += (dir > 0) ? 1 : -1;
+    if (target >= PAGES) target = 0;
+    if (target < 0) target = PAGES - 1;
+
+    if (g_show[target]) {
+      if (target == g_page)
+        return false;
+
+      quickFadeOut();
+      g_page = target;
+      drawCurrentPage();
+      quickFadeIn();
+      lastPageSwitch = millis();
+      return true;
+    }
+  }
+  return false;
+}
+
+static void handleMenuTap(int16_t x, int16_t y) {
+
+  if (x >= ARROW_L_X && x <= ARROW_L_X + ARROW_SZ && y >= ARROW_Y &&
+      y <= ARROW_Y + ARROW_SZ) {
+    if (menuPage > 0) {
+      menuPage--;
+      drawMenuGrid();
+    }
+    return;
+  }
+
+  if (x >= ARROW_R_X && x <= ARROW_R_X + ARROW_SZ && y >= ARROW_Y &&
+      y <= ARROW_Y + ARROW_SZ) {
+    if (menuPage < totalMenuPages - 1) {
+      menuPage++;
+      drawMenuGrid();
+    }
+    return;
+  }
+
+  if (x >= BTN_CANCEL_X && x <= BTN_CANCEL_X + ACT_BTN_W && y >= ACT_BTN_Y &&
+      y <= ACT_BTN_Y + ACT_BTN_H) {
+    pagesArrayFromMask(menuOriginalMask);
+    menuActive = false;
+    touchPaused = false;
+    clearPauseOverlay();
+    return;
+  }
+
+  if (x >= BTN_OK_X && x <= BTN_OK_X + ACT_BTN_W && y >= ACT_BTN_Y &&
+      y <= ACT_BTN_Y + ACT_BTN_H) {
+    prefs.begin("app", false);
+    prefs.putUInt("pages_mask", pagesMaskFromArray());
+    prefs.end();
+
+    menuActive = false;
+    touchPaused = false;
+    softReboot();
+    return;
+  }
+
+  for (uint8_t s = 0; s < visibleCount; s++) {
+    if (x >= slotX[s] && x <= slotX[s] + M_BTN_W && y >= slotY[s] &&
+        y <= slotY[s] + M_BTN_H) {
+
+      int8_t idx = slotIdx[s];
+
+      if (g_show[idx]) {
+        uint8_t active = 0;
+        for (uint8_t i = 0; i < (uint8_t)PAGES; i++)
+          active += g_show[i] ? 1 : 0;
+        if (active <= 1)
+          return;
+      }
+
+      g_show[idx] = !g_show[idx];
+      drawPageBtn(idx, slotX[s], slotY[s], g_show[idx]);
+      updateMenuCounter();
+      return;
+    }
+  }
+}
+
 static void touchLoop() {
   if (!touchReady)
     return;
+
   ts.read();
 
-  bool nowDown = (ts.touches > 0);
-  bool prevDown = (lastTouches > 0);
+  const bool nowDown = (ts.touches > 0);
+  const bool prevDown = (lastTouches > 0);
   lastTouches = ts.touches;
 
   if (!nowDown || prevDown)
     return;
 
-  uint32_t now = millis();
-  if (now - lastTouchMs < 200)
+  const uint32_t now = millis();
+  if ((uint32_t)(now - lastTouchMs) < 180U)
     return;
   lastTouchMs = now;
 
   int16_t x, y;
   mapTouch(x, y);
 
-  // =========================================================================
-  // MENU APERTO
-  // =========================================================================
   if (menuActive) {
-
-    // FRECCIA SINISTRA
-    if (x >= ARROW_L_X && x <= ARROW_L_X + ARROW_SZ && y >= ARROW_Y &&
-        y <= ARROW_Y + ARROW_SZ) {
-      if (menuPage > 0) {
-        menuPage--;
-        drawMenuGrid();
-      }
-      return;
-    }
-
-    // FRECCIA DESTRA
-    if (x >= ARROW_R_X && x <= ARROW_R_X + ARROW_SZ && y >= ARROW_Y &&
-        y <= ARROW_Y + ARROW_SZ) {
-      if (menuPage < totalMenuPages - 1) {
-        menuPage++;
-        drawMenuGrid();
-      }
-      return;
-    }
-
-    // ANNULLA
-    if (x >= BTN_CANCEL_X && x <= BTN_CANCEL_X + ACT_BTN_W && y >= ACT_BTN_Y &&
-        y <= ACT_BTN_Y + ACT_BTN_H) {
-      menuActive = false;
-      touchPaused = false;
-      clearPauseOverlay();
-      return;
-    }
-
-    // CONFERMA
-    if (x >= BTN_OK_X && x <= BTN_OK_X + ACT_BTN_W && y >= ACT_BTN_Y &&
-        y <= ACT_BTN_Y + ACT_BTN_H) {
-      prefs.begin("app", false);
-      prefs.putUInt("pages_mask", pagesMaskFromArray());
-      prefs.end();
-
-      menuActive = false;
-      touchPaused = false;
-      softReboot();
-      return;
-    }
-
-    // TOGGLE PAGINE
-    for (uint8_t s = 0; s < visibleCount; s++) {
-      if (x >= slotX[s] && x <= slotX[s] + M_BTN_W && y >= slotY[s] &&
-          y <= slotY[s] + M_BTN_H) {
-
-        int8_t idx = slotIdx[s];
-        g_show[idx] = !g_show[idx];
-        drawPageBtn(s, idx, slotX[s], slotY[s], g_show[idx]);
-        updateMenuCounter();
-        return;
-      }
-    }
-
+    handleMenuTap(x, y);
     return;
   }
 
-  // =========================================================================
-  // MENU CHIUSO → Apri
-  // =========================================================================
+  if (x < EDGE_TAP_W) {
+    stepConfiguredPage(-1);
+    return;
+  }
+
+  if (x >= TOUCH_WIDTH - EDGE_TAP_W) {
+    stepConfiguredPage(+1);
+    return;
+  }
+
   touchPaused = true;
   menuActive = true;
   drawPauseOverlay();

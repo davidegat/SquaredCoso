@@ -1,14 +1,3 @@
-/*
-===============================================================================
-   SQUARED — PAGINA "FOREX" + MONEY RAIN FX
-   Descrizione: Fetch tassi di cambio via API Frankfurter, rendering compatto
-                più animazione Money Rain per la sezione grafica a destra.
-   Autore: Davide “gat” Nasato
-   Repository: https://github.com/gatonegro/SquaredCoso
-   Licenza: CC BY-NC 4.0
-===============================================================================
-*/
-
 #pragma once
 
 #include "../handlers/globals.h"
@@ -32,9 +21,6 @@ extern bool httpGET(const String &, String &, uint32_t);
 
 extern bool jsonNum(const String &src, const char *key, float &out, int from);
 
-// ---------------------------------------------------------------------------
-// Stato FX globale
-// ---------------------------------------------------------------------------
 double fx_eur = NAN, fx_usd = NAN, fx_gbp = NAN, fx_jpy = NAN;
 double fx_cad = NAN, fx_cny = NAN, fx_inr = NAN, fx_chf = NAN;
 
@@ -42,35 +28,53 @@ double fx_prev_eur = NAN, fx_prev_usd = NAN, fx_prev_gbp = NAN;
 double fx_prev_jpy = NAN, fx_prev_cad = NAN;
 double fx_prev_cny = NAN, fx_prev_inr = NAN, fx_prev_chf = NAN;
 
-// ---------------------------------------------------------------------------
-// Formatter numerico compatto
-// ---------------------------------------------------------------------------
 static inline const char *fmtDoubleBuf(double v, uint8_t dec, char *out) {
   dtostrf(v, 0, dec, out);
   return out;
 }
 
-// ---------------------------------------------------------------------------
-// Fetch tassi FX dalla REST API (usa jsonNum degli helpers)
-// ---------------------------------------------------------------------------
 bool fetchFX() {
   if (!g_fiat.length())
     g_fiat = "CHF";
 
+  g_fiat.trim();
+  g_fiat.toUpperCase();
+  if (g_fiat.length() != 3)
+    g_fiat = "CHF";
+
+  static const char *CODES[] = {"CHF", "EUR", "USD", "GBP", "JPY", "CAD", "CNY", "INR"};
+  String symbols;
+  symbols.reserve(31);
+  for (uint8_t i = 0; i < 8; i++) {
+    if (g_fiat == CODES[i])
+      continue;
+    if (symbols.length())
+      symbols += ',';
+    symbols += CODES[i];
+  }
+
+  String url = F("https://api.frankfurter.dev/v1/latest?base=");
+  url += g_fiat;
+  url += F("&symbols=");
+  url += symbols;
+
   String body;
-  if (!httpGET("https://api.frankfurter.app/latest?from=" + g_fiat +
-                   "&to=CHF,EUR,USD,GBP,JPY,CAD,CNY,INR",
-               body, 10000))
+  if (!httpGET(url, body, 10000))
     return false;
 
-  int base = 0; // non serve cercare un blocco specifico
-
+  bool anyParsed = false;
   auto get = [&](const char *code, double &out) {
+    if (g_fiat == code) {
+      out = 1.0;
+      return;
+    }
     float f = NAN;
-    if (jsonNum(body, code, f, base))
+    if (jsonNum(body, code, f, 0)) {
       out = (double)f;
-    else
+      anyParsed = true;
+    } else {
       out = NAN;
+    }
   };
 
   get("EUR", fx_eur);
@@ -82,12 +86,8 @@ bool fetchFX() {
   get("INR", fx_inr);
   get("CHF", fx_chf);
 
-  return true;
+  return anyParsed;
 }
-
-// ===========================================================================
-// MONEY RAIN
-// ===========================================================================
 
 #define MONEY_COUNT 22
 
@@ -113,9 +113,6 @@ static uint32_t moneyLast = 0;
 
 static const uint16_t MONEY_COL[2] = {0x07E0, 0x03E0};
 
-// ---------------------------------------------------------------------------
-// Raggio
-// ---------------------------------------------------------------------------
 static inline int moneyRadius(uint8_t s) {
   const int w = 6 + s * 2;
   const int h = 8 + s * 2;
@@ -123,9 +120,6 @@ static inline int moneyRadius(uint8_t s) {
   return int(diag * 0.5f) + SAFE_M;
 }
 
-// ---------------------------------------------------------------------------
-// Draw banconota
-// ---------------------------------------------------------------------------
 static inline void drawMoney(int cx, int cy, uint8_t s, float rot,
                              uint16_t col) {
   const int w = 6 + s * 2;
@@ -156,9 +150,6 @@ static inline void drawMoney(int cx, int cy, uint8_t s, float rot,
   }
 }
 
-// ---------------------------------------------------------------------------
-// Init singolo money drop
-// ---------------------------------------------------------------------------
 static inline void moneyInitOne(int i) {
   MoneyDrop &m = money[i];
 
@@ -178,9 +169,6 @@ static inline void moneyInitOne(int i) {
   m.color = MONEY_COL[random(0, 2)];
 }
 
-// ---------------------------------------------------------------------------
-// Tick animazione
-// ---------------------------------------------------------------------------
 void tickFXDataStream(uint16_t bg) {
   uint32_t now = millis();
   if (now - moneyLast < 33)
@@ -241,9 +229,6 @@ void tickFXDataStream(uint16_t bg) {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Stampa una riga FX
-// ---------------------------------------------------------------------------
 static inline void fxPrintRow(const char *lbl, double prev, double val,
                               uint8_t dec, int &y, uint8_t scale,
                               uint16_t colUp, uint16_t colDown,
@@ -271,9 +256,6 @@ static inline void fxPrintRow(const char *lbl, double prev, double val,
   y += CHAR_H * scale + 6;
 }
 
-// ---------------------------------------------------------------------------
-// Pagina FX
-// ---------------------------------------------------------------------------
 void pageFX() {
   drawHeader("Exchange " + g_fiat);
 

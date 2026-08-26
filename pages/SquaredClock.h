@@ -1,14 +1,3 @@
-/*
-===============================================================================
-   SQUARED — PAGINA "CLOCK"
-   Descrizione: Orologio fullscreen stile “Midnight”, con sfondo geometrico,
-                arco decorativo, layout HH/MM gigante, badge giorno e data.
-   Autore: Davide “gat” Nasato
-   Repository: https://github.com/davidegat/SquaredCoso
-   Licenza: CC BY-NC 4.0
-===============================================================================
-*/
-
 #pragma once
 
 #include <Arduino.h>
@@ -34,52 +23,40 @@ extern void drawHLine(int y);
 
 extern String g_lang;
 
-// ---------------------------------------------------------------------------
-// PALETTE
-// ---------------------------------------------------------------------------
-static const uint16_t CLK_BG_DARK = 0x0000;   // Nero
-static const uint16_t CLK_BG_SUBTLE = 0x0841; // Grigio molto scuro per pattern
-static const uint16_t CLK_WHITE = 0xFFFF;     // Bianco
-static const uint16_t CLK_GRAY = 0x9CD3;      // Grigio chiaro
-static const uint16_t CLK_GRAY_DIM = 0x4A69;  // Grigio medio
-static const uint16_t CLK_ACCENT = 0xFE00;    // Arancione vivace
-static const uint16_t CLK_ACCENT2 = 0x07FF;   // Cyan
-static const uint16_t CLK_RING_BG = 0x18E3;   // Anello sfondo
+static const uint16_t CLK_BG_DARK = 0x0000;
+static const uint16_t CLK_BG_SUBTLE = 0x0841;
+static const uint16_t CLK_WHITE = 0xFFFF;
+static const uint16_t CLK_GRAY = 0x9CD3;
+static const uint16_t CLK_GRAY_DIM = 0x4A69;
+static const uint16_t CLK_ACCENT = 0xFE00;
+static const uint16_t CLK_ACCENT2 = 0x07FF;
+static const uint16_t CLK_RING_BG = 0x18E3;
 
-// ============================================================================
-// HELPER: Disegna sfondo con pattern geometrico
-// ============================================================================
 static void drawClockBackground() {
-  // Sfondo nero solido
+
   gfx->fillScreen(CLK_BG_DARK);
 
-  // Pattern: cerchi concentrici in basso a destra (decorativi)
   for (int i = 5; i >= 1; i--) {
     int radius = 60 + i * 45;
     gfx->drawCircle(480 + 40, 480 + 40, radius, CLK_BG_SUBTLE);
   }
 
-  // Pattern: cerchi concentrici in alto a sinistra
   for (int i = 3; i >= 1; i--) {
     int radius = 30 + i * 35;
     gfx->drawCircle(-30, -30, radius, CLK_BG_SUBTLE);
   }
 
-  // Linea diagonale decorativa sottile
   for (int i = 0; i < 3; i++) {
     gfx->drawLine(0, 350 + i * 40, 130 + i * 40, 480, CLK_BG_SUBTLE);
   }
 }
 
-// ============================================================================
-// HELPER: Disegna arco decorativo attorno all'ora
-// ============================================================================
 static void drawDecorativeArc(int cx, int cy, int r, int thickness,
                               uint16_t color) {
-  // Simula un arco nella parte superiore
+
   for (int t = 0; t < thickness; t++) {
     int currentR = r + t;
-    // Disegna solo la parte superiore (da -45° a +45° circa)
+
     for (int angle = -50; angle <= 50; angle++) {
       float rad = angle * 3.14159 / 180.0;
       int x = cx + (int)(currentR * sin(rad));
@@ -91,77 +68,96 @@ static void drawDecorativeArc(int cx, int cy, int r, int thickness,
   }
 }
 
-// ============================================================================
-// CLOCK FULLSCREEN - MINIMAL BOLD LAYOUT
-// ============================================================================
+static int8_t clock_prev_hour = -1;
+static int8_t clock_prev_min = -1;
+static int8_t clock_prev_mday = -1;
+static int8_t clock_prev_mon = -1;
+static int16_t clock_prev_year = -1;
+
+static inline void drawClockHourDigits(uint8_t hour) {
+  const int scale = 14;
+  const int cw = BASE_CHAR_W * scale;
+  const int ch = BASE_CHAR_H * scale;
+  const int centerX = 240;
+  const int hoursY = 70;
+  const int hoursW = 2 * cw;
+
+  gfx->fillRect(centerX - hoursW / 2 - 4, hoursY - 4,
+                hoursW + 8, ch + 8, CLK_BG_DARK);
+  drawDecorativeArc(240, 200, 180, 3, CLK_ACCENT);
+  drawDecorativeArc(240, 200, 190, 2, CLK_GRAY_DIM);
+
+  char buf[3];
+  snprintf(buf, sizeof(buf), "%02u", (unsigned)hour);
+  gfx->setTextSize(scale);
+  gfx->setTextColor(CLK_WHITE, CLK_BG_DARK);
+  gfx->setCursor(centerX - hoursW / 2, hoursY);
+  gfx->print(buf);
+}
+
+static inline void drawClockMinuteDigits(uint8_t minute) {
+  const int scale = 14;
+  const int cw = BASE_CHAR_W * scale;
+  const int ch = BASE_CHAR_H * scale;
+  const int centerX = 240;
+  const int hoursY = 70;
+  const int hoursW = 2 * cw;
+  const int sepY = hoursY + ch + 8;
+  const int minsY = sepY + 16;
+
+  gfx->fillRect(centerX - hoursW / 2 - 4, minsY - 4,
+                hoursW + 8, ch + 8, CLK_BG_DARK);
+
+  char buf[3];
+  snprintf(buf, sizeof(buf), "%02u", (unsigned)minute);
+  gfx->setTextSize(scale);
+  gfx->setTextColor(CLK_GRAY, CLK_BG_DARK);
+  gfx->setCursor(centerX - hoursW / 2, minsY);
+  gfx->print(buf);
+}
+
 inline void pageClock() {
   time_t now;
   struct tm t;
   time(&now);
   localtime_r(&now, &t);
 
-  // ---------------------------------------------------------------------------
-  // buffer ora e data
-  // ---------------------------------------------------------------------------
   char bufH[3];
   char bufM[3];
   char bufD[16];
 
   snprintf(bufH, sizeof(bufH), "%02d", t.tm_hour);
   snprintf(bufM, sizeof(bufM), "%02d", t.tm_min);
-
   snprintf(bufD, sizeof(bufD), "%02d/%02d/%04d", t.tm_mday, t.tm_mon + 1,
            t.tm_year + 1900);
 
-  // ---------------------------------------------------------------------------
-  // SFONDO CON PATTERN
-  // ---------------------------------------------------------------------------
   drawClockBackground();
-
-  // ---------------------------------------------------------------------------
-  // ARCO DECORATIVO SUPERIORE
-  // ---------------------------------------------------------------------------
   drawDecorativeArc(240, 200, 180, 3, CLK_ACCENT);
   drawDecorativeArc(240, 200, 190, 2, CLK_GRAY_DIM);
 
-  // ---------------------------------------------------------------------------
-  // OROLOGIO GIGANTE - Layout verticale HH / MM
-  // ---------------------------------------------------------------------------
   const int scale = 14;
   const int cw = BASE_CHAR_W * scale;
   const int ch = BASE_CHAR_H * scale;
-
-  // Centro schermo
   const int centerX = 240;
-
-  // ORE - parte superiore
   const int hoursY = 70;
-  gfx->setTextSize(scale);
-  gfx->setTextColor(CLK_WHITE);
+  const int hoursW = 2 * cw;
 
-  int hoursW = 2 * cw;
+  gfx->setTextSize(scale);
+  gfx->setTextColor(CLK_WHITE, CLK_BG_DARK);
   gfx->setCursor(centerX - hoursW / 2, hoursY);
   gfx->print(bufH);
 
-  // Linea separatrice orizzontale con accent
   const int sepY = hoursY + ch + 8;
   gfx->fillRect(centerX - 100, sepY, 200, 4, CLK_ACCENT);
-
-  // Pallini decorativi ai lati della linea
   gfx->fillCircle(centerX - 110, sepY + 2, 6, CLK_ACCENT);
   gfx->fillCircle(centerX + 110, sepY + 2, 6, CLK_ACCENT);
 
-  // MINUTI - parte inferiore
   const int minsY = sepY + 16;
   gfx->setTextSize(scale);
-  gfx->setTextColor(CLK_GRAY);
-
+  gfx->setTextColor(CLK_GRAY, CLK_BG_DARK);
   gfx->setCursor(centerX - hoursW / 2, minsY);
   gfx->print(bufM);
 
-  // ---------------------------------------------------------------------------
-  // BADGE GIORNO SETTIMANA
-  // ---------------------------------------------------------------------------
   static const char it_wd[7][12] PROGMEM = {"Domenica",  "Lunedi",  "Martedi",
                                             "Mercoledi", "Giovedi", "Venerdi",
                                             "Sabato"};
@@ -184,25 +180,55 @@ inline void pageClock() {
   const int badgeX = centerX - badgeW / 2;
   const int badgeY = 355;
 
-  // Sfondo badge
   gfx->fillRoundRect(badgeX, badgeY, badgeW, badgeH, badgeH / 2, CLK_RING_BG);
   gfx->drawRoundRect(badgeX, badgeY, badgeW, badgeH, badgeH / 2, CLK_ACCENT);
-
-  // Testo giorno
   gfx->setTextSize(wdScale);
-  gfx->setTextColor(CLK_WHITE);
+  gfx->setTextColor(CLK_WHITE, CLK_RING_BG);
   gfx->setCursor(badgeX + badgePadX, badgeY + badgePadY);
   gfx->print(wd);
 
-  // ---------------------------------------------------------------------------
-  // DATA
-  // ---------------------------------------------------------------------------
   const int dateY = 420;
   const int dateScale = 3;
   const int dateW = strlen(bufD) * BASE_CHAR_W * dateScale;
-
   gfx->setTextSize(dateScale);
-  gfx->setTextColor(CLK_GRAY_DIM);
+  gfx->setTextColor(CLK_GRAY_DIM, CLK_BG_DARK);
   gfx->setCursor(centerX - dateW / 2, dateY);
   gfx->print(bufD);
+
+  clock_prev_hour = t.tm_hour;
+  clock_prev_min = t.tm_min;
+  clock_prev_mday = t.tm_mday;
+  clock_prev_mon = t.tm_mon;
+  clock_prev_year = t.tm_year;
+  gfx->setTextSize(TEXT_SCALE);
+}
+
+inline void tickClock() {
+  time_t now;
+  struct tm t;
+  time(&now);
+  localtime_r(&now, &t);
+
+  if (clock_prev_hour < 0 || clock_prev_min < 0) {
+    pageClock();
+    return;
+  }
+
+  if (t.tm_mday != clock_prev_mday || t.tm_mon != clock_prev_mon ||
+      t.tm_year != clock_prev_year) {
+    pageClock();
+    return;
+  }
+
+  if (t.tm_hour != clock_prev_hour) {
+    drawClockHourDigits((uint8_t)t.tm_hour);
+    clock_prev_hour = t.tm_hour;
+  }
+
+  if (t.tm_min != clock_prev_min) {
+    drawClockMinuteDigits((uint8_t)t.tm_min);
+    clock_prev_min = t.tm_min;
+  }
+
+  gfx->setTextSize(TEXT_SCALE);
 }

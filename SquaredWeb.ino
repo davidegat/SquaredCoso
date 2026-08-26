@@ -1,33 +1,12 @@
-/*
-===============================================================================
-   SQUARED — CAPTIVE PORTAL & WEBUI
-   Modulo principale per:
-     • modalità AP con Captive Portal (Wi-Fi setup iniziale)
-     • modalità STA con dashboard e pagina impostazioni
-     • routing HTTP completo (AP/STA)
-     • salvataggio credenziali Wi-Fi via NVS
-     • form di configurazione (meteo, lingue, pagine, API, QOD, BTC,
-       Home Assistant, RSS, countdown, post-it)
-
-   Funzionalità incluse:
-     – DNS hijack per captive portal
-     – web server responsivo con tema moderno neon-dark
-     – generazione HTML dinamica lato ESP32-S3
-     – integrazione con Preferences, globali e scheduler
-
-   Autore: Davide “gat” Nasato
-   Repository: https://github.com/davidegat/SquaredCoso
-   Licenza: CC BY-NC 4.0
-===============================================================================
-*/
-
-
+// STA WebUI and first-boot captive-portal routing.
 #include <WiFi.h>
 #include <WebServer.h>
 #include <HTTPClient.h>
+#include <WiFiClientSecure.h>
 #include <DNSServer.h>
 #include <Preferences.h>
 #include "handlers/globals.h"
+#include "handlers/tls_roots.h"
 
 #define DNS_PORT 53
 
@@ -40,20 +19,19 @@ extern void handleSettings();
 extern void handleForceQOD();
 
 extern uint32_t PAGE_INTERVAL_MS;
+extern const char FW_VERSION[];
 
 extern String g_city, g_lang, g_ics, g_fiat, g_rss_url;
+extern String g_tz_rule;
+extern uint8_t g_rotation;
 extern String g_oa_key, g_oa_topic;
-extern String g_from_station, g_to_station;
-extern String g_ha_ip, g_ha_token;
+extern String g_ha_ip, g_ha_token, g_ha_entities;
 
 extern double g_btc_owned;
 
 extern bool g_show[PAGES];
 extern CDEvent cd[8];
 
-// ---------------------------------------------------------------------------
-// HTTP GET
-// ---------------------------------------------------------------------------
 bool httpGET(const String& url, String& out, uint32_t timeout) {
   HTTPClient http;
   http.setTimeout(timeout);
@@ -72,7 +50,6 @@ bool httpGET(const String& url, String& out, uint32_t timeout) {
   return true;
 }
 
-// case-insensitive search
 int indexOfCI(const String& s, const String& pat, int from) {
   int n = s.length();
   int m = pat.length();
@@ -92,9 +69,22 @@ int indexOfCI(const String& s, const String& pat, int from) {
   return -1;
 }
 
-/* ---------------------------------------------------------------------------
-   CAPTIVE PORTAL — AP MODE
---------------------------------------------------------------------------- */
+static String htmlEscape(const String &src) {
+  String out;
+  out.reserve(src.length() + 16);
+  for (int i = 0; i < src.length(); i++) {
+    char c = src[i];
+    switch (c) {
+      case '&': out += F("&amp;"); break;
+      case '<': out += F("&lt;"); break;
+      case '>': out += F("&gt;"); break;
+      case '"': out += F("&quot;"); break;
+      case '\'': out += F("&#39;"); break;
+      default: out += c; break;
+    }
+  }
+  return out;
+}
 
 static String htmlAP() {
   String ip = WiFi.softAPIP().toString();
@@ -183,9 +173,6 @@ static void handleReboot() {
   ESP.restart();
 }
 
-/* ---------------------------------------------------------------------------
-   CHECKBOX helper
---------------------------------------------------------------------------- */
 static String checkbox(const char* name, bool checked, const char* label) {
   String s;
   s.reserve(120);
@@ -199,569 +186,413 @@ static String checkbox(const char* name, bool checked, const char* label) {
   return s;
 }
 
-/* ---------------------------------------------------------------------------
-   SETTINGS PAGE — STA MODE
---------------------------------------------------------------------------- */
-String htmlSettings(bool saved, const String& msg) {
+static String statusPill(bool configured, bool it) {
+  String s = "<span class='status ";
+  s += configured ? "on'>" : "off'>";
+  s += configured ? (it ? "configurato" : "configured")
+                  : (it ? "non configurato" : "not configured");
+  s += "</span>";
+  return s;
+}
 
+static String pageChip(const char *name, bool checked, const char *label) {
+  String s;
+  s.reserve(150);
+  s += "<label class='page-chip'><input class='page-toggle' type='checkbox' name='";
+  s += name;
+  s += "' value='1'";
+  if (checked) s += " checked";
+  s += "><span>";
+  s += label;
+  s += "</span></label>";
+  return s;
+}
+
+static String uptimeCompact() {
+  uint32_t sec = millis() / 1000UL;
+  uint32_t days = sec / 86400UL; sec %= 86400UL;
+  uint8_t hours = sec / 3600UL; sec %= 3600UL;
+  uint8_t mins = sec / 60UL;
+  String out;
+  if (days) { out += String(days); out += "d "; }
+  if (hours || days) { out += String(hours); out += "h "; }
+  out += String(mins); out += "m";
+  return out;
+}
+
+static bool testOpenAIKey() {
+  if (!g_oa_key.length()) return false;
+  WiFiClientSecure client;
+  client.setCACert(OPENAI_ROOT_CA);
+  HTTPClient http;
+  http.setTimeout(7000);
+  if (!http.begin(client, "https://api.openai.com/v1/models")) return false;
+  http.addHeader(F("Authorization"), String(F("Bearer ")) + g_oa_key);
+  int code = http.GET();
+  http.end();
+  return code >= 200 && code < 300;
+}
+
+static void handleIntegrationTest() {
+  const bool it = (g_lang == "it");
+  String kind = web.arg("kind");
+  bool ok = false;
+  String msg;
+
+  if (kind == "ics") {
+    if (!g_ics.length()) msg = it ? "URL calendario non configurato" : "Calendar URL not configured";
+    else {
+      ok = fetchICS();
+      msg = ok ? (it ? "Calendario raggiungibile" : "Calendar reachable")
+               : (it ? "Errore nel calendario" : "Calendar test failed");
+    }
+  } else if (kind == "rss") {
+    ok = fetchNews();
+    msg = ok ? (it ? "Feed RSS raggiungibile" : "RSS feed reachable")
+             : (it ? "Errore nel feed RSS" : "RSS test failed");
+  } else if (kind == "ha") {
+    if (!g_ha_token.length()) msg = it ? "Token Home Assistant non configurato" : "Home Assistant token not configured";
+    else {
+      ok = fetchHA();
+      msg = ok ? (it ? "Home Assistant raggiungibile" : "Home Assistant reachable")
+               : (it ? "Home Assistant non raggiungibile" : "Home Assistant test failed");
+    }
+  } else if (kind == "openai") {
+    if (!g_oa_key.length()) msg = it ? "Chiave OpenAI non configurata" : "OpenAI key not configured";
+    else {
+      ok = testOpenAIKey();
+      msg = ok ? (it ? "Chiave OpenAI valida" : "OpenAI key is valid")
+               : (it ? "OpenAI non raggiungibile o chiave non valida" : "OpenAI unreachable or key invalid");
+    }
+  } else {
+    web.send(400, "text/plain; charset=utf-8", it ? "Test sconosciuto" : "Unknown test");
+    return;
+  }
+
+  web.send(ok ? 200 : 503, "text/plain; charset=utf-8", msg);
+}
+
+String htmlSettings(bool saved, const String& msg) {
   const bool it = (g_lang == "it");
 
   const char* t_title = it ? "Impostazioni" : "Settings";
-  const char* t_saved = it ? "Impostazioni salvate. Ricarico…" : "Settings saved. Reloading…";
-
-  const char* t_general = it ? "Generale" : "General";
-  const char* t_city = it ? "Città (meteo / aria)" : "City (weather / air)";
-  const char* t_lang = it ? "Lingua interfaccia (it/en)" : "UI language (it/en)";
-  const char* t_ics = it ? "URL calendario ICS" : "ICS calendar URL";
-  const char* t_pageint = it ? "Intervallo cambio pagina (secondi)" : "Page switch interval (seconds)";
-
-  const char* t_qod = it ? "Frase del giorno" : "Quote of the Day";
-  const char* t_qoddesc = it ? "Se imposti la chiave OpenAI userò GPT." : "If OpenAI key is set, GPT will be used.";
-  const char* t_oa_key = "OpenAI API Key";
-  const char* t_oa_topic = it ? "Argomento frase" : "Quote topic";
-  const char* t_force = it ? "Richiedi nuova frase ora" : "Get new quote now";
-
-  const char* t_btc = "Bitcoin";
-  const char* t_btc_amt = it ? "Quantità di BTC posseduti" : "Owned BTC amount";
-
-  const char* t_rss = "RSS News";
-  const char* t_rss_label = "RSS feed URL";
-
-  const char* t_pages = it ? "Pagine visibili" : "Visible pages";
-
-  const char* t_count = it ? "Countdown (max 8)" : "Countdowns (max 8)";
-  const char* t_name = it ? "Nome #" : "Name #";
-  const char* t_time = it ? "Data/ora #" : "Date/time #";
-
-  const char* t_savebtn = it ? "Salva impostazioni" : "Save settings";
-  const char* t_home = it ? "Dashboard" : "Home";
-  const char* t_ha = "Home Assistant";
+  const char* t_savebtn = it ? "Salva" : "Save";
+  const char* t_home = it ? "Dashboard" : "Dashboard";
 
   String notice;
-  if (saved) notice = "<div class='alert ok'>" + String(t_saved) + "</div>";
-  else if (msg.length()) notice = "<div class='alert warn'>" + msg + "</div>";
+  if (saved) {
+    notice = "<div class='alert ok'>" + String(it ? "Impostazioni salvate." : "Settings saved.") + "</div>";
+  } else if (msg.length()) {
+    bool good = msg.startsWith("ok:");
+    String shown = good ? msg.substring(3) : msg;
+    notice = "<div class='alert ";
+    notice += good ? "ok'>" : "warn'>";
+    notice += htmlEscape(shown);
+    notice += "</div>";
+  }
 
-  uint32_t page_s = PAGE_INTERVAL_MS / 1000;
+  uint32_t page_s = PAGE_INTERVAL_MS / 1000UL;
+  bool tzEurope = (g_tz_rule == "CET-1CEST,M3.5.0,M10.5.0/3");
+  bool tzUTC = (g_tz_rule == "UTC0");
+  bool tzCustom = !tzEurope && !tzUTC;
 
-  // Nomi pagine
-  static const char* names_it[PAGES] = {
-    "Meteo",
-    "Aria",
-    "Orologio",
-    "Orologio Binario",
-    "Calendario ICS",
-    "Bitcoin",
-    "Frase del giorno",
-    "Info",
-    "Countdown",
-    "Valute",
-    "Temp 7 giorni",
-    "Ore di luce",
-    "News",
-    "Home Assistant",
-    "Sistema Solare",
-    "Post-it",
-    "Chronos"
-  };
-
-  static const char* names_en[PAGES] = {
-    "Weather",
-    "Air",
-    "Clock",
-    "Binary Clock",
-    "Calendar",
-    "Bitcoin",
-    "Quote of the Day",
-    "Info",
-    "Countdown",
-    "FX",
-    "Temp 7 days",
-    "Sunlight",
-    "News",
-    "Home Assistant",
-    "Solar System",
-    "Sticky Note",
-    "Chronos"
-  };
-
-  const char** names = it ? names_it : names_en;
-
-  // Costruzione pagina
   String page;
-  page.reserve(9000);
-
-  page += "<!doctype html><html><head>"
-          "<meta charset='utf-8'/>"
-          "<meta name='viewport' content='width=device-width, initial-scale=1'/>"
-          "<title>"
-          + String(t_title) + "</title>";
-
-  // CSS
-  page +=
-    "<style>"
-    "body{margin:0;font-family:-apple-system,BlinkMacSystemFont,system-ui,sans-serif;"
-    "background:#050814;color:#f5f5f7;}"
-    "header{position:sticky;top:0;z-index:10;background:linear-gradient(135deg,#0b1020,#071537);"
-    "padding:14px 18px 10px;border-bottom:1px solid #20274a;}"
-    "header h1{margin:0;font-size:1.35rem;color:#ffdf40;}"
-    "header p{margin:2px 0 0;font-size:.8rem;color:#b3b7ff;}"
-    "main{max-width:960px;margin:0 auto;padding:14px 10px 80px;}"
-
-    ".alert{border-radius:10px;padding:10px 12px;font-size:.85rem;margin:10px 4px 14px;}"
-    ".alert.ok{background:#102a1b;border:1px solid #1f8b3b;color:#b4f3c4;}"
-    ".alert.warn{background:#2a1710;border:1px solid #e26f3b;color:#ffd2b6;}"
-
-    ".card{background:#0b1020;border:1px solid #191f3b;border-radius:16px;"
-    "padding:16px 16px 14px;margin:10px 4px;box-shadow:0 10px 26px rgba(0,0,0,.45);}"
-    ".card h3{margin:0 0 8px;font-size:1rem;color:#ffdf40;}"
-    ".card p.desc{margin:4px 0 10px;font-size:.8rem;color:#a9afff;}"
-
-    ".grid-2{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px;}"
-    ".grid-pages{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px;}"
-
-    "label.field{display:block;margin:8px 0 4px;font-size:.8rem;color:#b3b8ff;}"
-
-    "input[type='text'],input[type='password'],input[type='number'],input[type='datetime-local'],"
-    "select{width:100%;padding:9px 10px;border-radius:10px;border:1px solid #313855;"
-    "background:#070b18;color:#f5f5f7;box-sizing:border-box;font-size:.92rem;}"
-
-    ".chk{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid #232949;"
-    "border-radius:10px;font-size:.9rem;background:#070b18;}"
-    ".chk input{width:auto;margin:0;}"
-
-    ".footer-bar{position:fixed;left:0;right:0;bottom:0;background:#050814f2;"
-    "border-top:1px solid #22284a;padding:8px 10px;backdrop-filter:blur(8px);}"
-    ".footer-inner{max-width:960px;margin:0 auto;display:flex;align-items:center;"
-    "justify-content:space-between;gap:8px;}"
-
-    ".btn-primary{border:none;border-radius:999px;padding:9px 16px;font-size:.9rem;font-weight:600;"
-    "background:linear-gradient(135deg,#ffdf40,#ff7a40);color:#111;cursor:pointer;}"
-    ".btn-secondary{border-radius:999px;padding:8px 14px;font-size:.85rem;border:1px solid #3b436e;"
-    "background:transparent;color:#d6dcff;text-decoration:none;}"
-    "</style></head><body>";
-
-  // Header
-  page += "<header><h1>" + String(t_title) + "</h1>"
-                                             "<p>Gat Multi Ticker — SquaredCoso</p></header><main>";
-
-  page += notice;
-
-  page += "<form method='POST' action='/settings'>"
-          "<div class='grid-2'>";
-
-  // --- CARD GENERALE -------------------------------------------------------
-  page += "<div class='card'><h3>" + String(t_general) + "</h3>";
-
-  page += "<label class='field'>" + String(t_city) + "</label><input name='city' type='text' value='" + sanitizeText(g_city) + "'/>";
-
-  page += "<label class='field'>" + String(t_lang) + "</label><input name='lang' type='text' value='" + sanitizeText(g_lang) + "'/>";
-
-  page += "<label class='field'>" + String(t_ics) + "</label><input name='ics' type='text' value='" + sanitizeText(g_ics) + "'/>";
-
-  page += "<label class='field'>" + String(t_pageint) + "</label><input name='page_s' type='number' min='5' max='600' value='" + String(page_s) + "'/>";
-
-  page += checkbox("splash_enabled", g_splash_enabled,
-                   it ? "Mostra immagini splash" : "Enable splash images");
-
-  page += "</div>";  // fine CARD GENERALE
-
-
-  // --- PAGINE VISIBILI -----------------------------------------------------
-  page += "<div class='card'><h3>" + String(t_pages) + "</h3>";
-
-  /* --- Pulsante seleziona/deseleziona tutto --- */
-  page +=
-    "<button type='button' id='toggleAll' "
-    "style='margin:6px 0 10px;padding:6px 12px;border-radius:8px;"
-    "background:#232949;border:1px solid #3b436e;color:#d6dcff;"
-    "font-size:.82rem;cursor:pointer;'>"
-    + String(it ? "Seleziona / Deseleziona tutto" : "Select / Deselect all")
-    + "</button>";
-
-  /* --- Script JS per togglare tutte le checkbox delle pagine --- */
-  page +=
-    "<script>"
-    "document.getElementById('toggleAll').onclick=function(){"
-    "const boxes=document.querySelectorAll('.grid-pages input[type=checkbox]');"
-    "let allChecked=true;"
-    "boxes.forEach(b=>{ if(!b.checked) allChecked=false; });"
-    "boxes.forEach(b=>{ b.checked=!allChecked; });"
-    "};"
-    "</script>";
-
-  /* --- Griglia con le checkbox --- */
-  page += "<div class='grid-pages'>";
-
-  page += checkbox("p_WEATHER", g_show[P_WEATHER], it ? "Meteo" : "Weather");
-  page += checkbox("p_AIR", g_show[P_AIR], it ? "Qualità aria" : "Air quality");
-  page += checkbox("p_CLOCK", g_show[P_CLOCK], it ? "Orologio" : "Clock");
-  page += checkbox("p_BINARY", g_show[P_BINARY], "Binary Clock");
-  page += checkbox("p_CAL", g_show[P_CAL], it ? "Calendario ICS" : "Calendar");
-  page += checkbox("p_BTC", g_show[P_BTC], "Bitcoin");
-  page += checkbox("p_QOD", g_show[P_QOD], it ? "Frase del giorno" : "Quote of the Day");
-  page += checkbox("p_INFO", g_show[P_INFO], "Info");
-  page += checkbox("p_COUNT", g_show[P_COUNT], "Countdown");
-  page += checkbox("p_FX", g_show[P_FX], it ? "Valute" : "FX");
-  page += checkbox("p_T24", g_show[P_T24], "Temp 7 days");
-  page += checkbox("p_SUN", g_show[P_SUN], it ? "Ore di luce" : "Sunlight");
-  page += checkbox("p_NEWS", g_show[P_NEWS], "News");
-  page += checkbox("p_HA", g_show[P_HA], "Home Assistant");
-  page += checkbox("p_STELLAR", g_show[P_STELLAR], it ? "Sistema Solare" : "Solar System");
-  page += checkbox("p_NOTES", g_show[P_NOTES], it ? "Post-it" : "Sticky Note");
-  page += checkbox("p_CHRONOS", g_show[P_CHRONOS], "Chronos");
-
-
-  page += "</div></div></div>";  // chiude grid colonne principali
-
-
-  // --- QOD + BTC + HA + RSS ------------------------------------------------
-  page += "<div class='grid-2'>";
-
-  // QOD
-  page += "<div class='card'><h3>" + String(t_qod) + "</h3>"
-                                                     "<p class='desc'>"
-          + String(t_qoddesc) + "</p>";
-
-  page += "<label class='field'>" + String(t_oa_key) + "</label>"
-                                                       "<input name='openai_key' type='password' value='"
-          + sanitizeText(g_oa_key) + "'/>";
-
-  page += "<label class='field'>" + String(t_oa_topic) + "</label>"
-                                                         "<input name='openai_topic' type='text' value='"
-          + sanitizeText(g_oa_topic) + "'/>";
-
-  page += "<p style='margin-top:10px'>"
-          "<button class='btn-secondary' formaction='/force_qod' formmethod='POST'>"
-          + String(t_force) + "</button></p>";
-
-  page += "</div>";
-
-  // Colonna destra
-  page += "<div>";
-
-  // BTC
-  page += "<div class='card'><h3>" + String(t_btc) + "</h3>";
-  page += "<label class='field'>" + String(t_btc_amt) + "</label>"
-                                                        "<input name='btc_owned' type='number' step='0.00000001' value='";
-  if (!isnan(g_btc_owned)) page += String(g_btc_owned, 8);
-  page += "'/></div>";
-
-  // HA
-  page += "<div class='card'><h3>" + String(t_ha) + "</h3>"
-                                                    "<label class='field'>IP</label>"
-                                                    "<input name='ha_ip' type='text' value='"
-          + sanitizeText(g_ha_ip) + "'/>"
-                                    "<label class='field'>Token</label>"
-                                    "<input name='ha_token' type='password' value='"
-          + sanitizeText(g_ha_token) + "'/>"
-                                       "</div>";
-
-  // RSS
-  page += "<div class='card'><h3>" + String(t_rss) + "</h3>"
-                                                     "<label class='field'>"
-          + String(t_rss_label) + "</label>"
-                                  "<input name='rss_url' type='text' value='"
-          + sanitizeText(g_rss_url) + "'/>"
-                                      "</div>";
-
-  page += "</div></div>";  // fine grid-2 QOD/BTC/HA/RSS
-
-
-  // --- COUNTDOWN -----------------------------------------------------------
-  page += "<div class='card'><h3>" + String(t_count) + "</h3>";
-
-  for (int i = 0; i < 8; i++) {
-    page += "<div class='row'><div>"
-            "<label class='field'>"
-            + String(t_name) + String(i + 1) + "</label>"
-                                               "<input name='cd"
-            + String(i + 1) + "n' type='text' value='" + sanitizeText(cd[i].name) + "'/></div>";
-
-    page += "<div><label class='field'>" + String(t_time) + String(i + 1) + "</label>"
-                                                                            "<input name='cd"
-            + String(i + 1) + "t' type='datetime-local' value='" + sanitizeText(cd[i].whenISO) + "'/></div></div>";
-  }
-
-  page += "</div>";  // fine CARD COUNTDOWN
-  // --- NOTE (POST-IT) -------------------------------------------------------
-  page += "<div class='card'><h3>";
-  page += (it ? "Post-it" : "Sticky Note");
-  page += "</h3>";
-
-  page += "<label class='field'>";
-  page += (it ? "Testo del post-it" : "Note text");
-  page += "</label>";
-
-  page += "<textarea name='note' rows='3' style='width:100%;padding:8px;";
-  page += "border-radius:10px;border:1px solid #313855;background:#070b18;";
-  page += "color:#f5f5f7;box-sizing:border-box;font-size:.92rem;'>";
-  page += sanitizeText(g_note);
-  page += "</textarea>";
-
-  page += "<p class='desc' style='font-size:.8rem;color:#a9afff;margin-top:6px;'>";
-  page += (it ? "Lascia vuoto per cancellare il post-it."
-              : "Leave empty to remove sticky note.");
-  page += "</p>";
-
-  page += "</div>";  // fine card Post-it
-
-
-  // FOOTER
-  page += "</main>"
-          "<div class='footer-bar'><div class='footer-inner'><span>"
-          + String(it ? "Le modifiche vengono applicate dopo il salvataggio."
-                      : "Changes apply after saving.")
-          + "</span><div><button class='btn-primary' type='submit'>"
-          + String(t_savebtn)
-          + "</button> <a class='btn-secondary' href='/'>"
-          + String(t_home)
-          + "</a></div></div></div></form></body></html>";
-
-  return page;
-}
-
-
-
-/* ---------------------------------------------------------------------------
-   HOME STA — DASHBOARD COMPLETA
---------------------------------------------------------------------------- */
-static String htmlHome() {
-  const bool it = (g_lang == "it");
-
-  // --------- Testi localizzati ---------
-  const char* t_title = "Gat Multi Ticker";
-  const char* t_profile = it ? "Profilo pannello" : "Panel profile";
-  const char* t_city = it ? "Città" : "City";
-  const char* t_lang_label = it ? "Lingua interfaccia" : "UI language";
-  const char* t_fiat = it ? "Valuta base" : "Base currency";
-  const char* t_ics = it ? "Calendario ICS" : "ICS calendar URL";
-
-  const char* t_pages_card = it ? "Rotazione pagine" : "Page rotation";
-  const char* t_pages_on = it ? "Pagine attive" : "Active pages";
-  const char* t_pages_off = it ? "Pagine disattivate" : "Disabled pages";
-  const char* t_pages_int = it ? "Intervallo cambio pagina" : "Page switch interval";
-
-  const char* t_data = it ? "Dati & integrazioni" : "Data & integrations";
-  const char* t_qod_label = it ? "Frase del giorno" : "Quote of the Day";
-  const char* t_qod_src_ai = it ? "OpenAI (tema: " : "OpenAI (topic: ";
-  const char* t_qod_src_zen = it ? "ZenQuotes (predefinito)" : "ZenQuotes (default)";
-  const char* t_btc_label = "Bitcoin";
-  const char* t_btc_amt = it ? "BTC posseduti" : "Owned BTC";
-  const char* t_rss_label = "RSS";
-  const char* t_rss_url = it ? "Feed RSS" : "RSS feed URL";
-  const char* t_ha_label = "Home Assistant";
-  const char* t_ha_ip = "IP";
-  const char* t_ha_token = "Token";
-  const char* t_ha_missing = it ? "non impostato" : "not set";
-
-  const char* t_cd_card = it ? "Countdown configurati" : "Configured countdowns";
-  const char* t_cd_none = it ? "Nessun countdown attivo" : "No active countdowns";
-  const char* t_cd_count = it ? "Totale countdown" : "Total countdowns";
-  const char* t_cd_list = it ? "Nomi" : "Names";
-
-  const char* t_settings = it ? "Apri impostazioni" : "Open settings";
-
-  // --------- Intervallo pagine ----------
-  uint32_t s = PAGE_INTERVAL_MS / 1000;
-
-  // --------- Nomi pagine (it/en) --------
-  static const char* names_it[PAGES] = {
-    "Meteo",             // 0
-    "Aria",              // 1
-    "Orologio",          // 2
-    "Orologio Binario",  //3
-    "Calendario ICS",    // 4
-    "Bitcoin",           // 5
-    "Frase del giorno",  //6
-    "Info",              // 7
-    "Countdown",         // 8
-    "Valute",            // 9
-    "T24",               // 10
-    "Ore di luce",       // 11
-    "News",              // 12
-    "Home Assistant",    // 13
-    "Sistema Solare",    // 14
-    "Post-it",           // 15
-    "Chronos"            // 16
-  };
-
-  static const char* names_en[PAGES] = {
-    "Weather",           // 0
-    "Air",               // 1
-    "Clock",             // 2
-    "Binary Clock",      // 3
-    "Calendar",          // 4
-    "Bitcoin",           // 5
-    "Quote of the Day",  //6
-    "Info",              // 7
-    "Countdown",         // 8
-    "FX",                // 9
-    "T24",               // 10
-    "Sunlight",          // 11
-    "News",              // 12
-    "Home Assistant",    // 13
-    "Solar System",      // 14
-    "Sticky Note",       // 15
-    "Chronos"            // 16
-  };
-
-  const char** names = it ? names_it : names_en;
-
-  // Liste pagine attive / disattive
-  String enabledList;
-  String disabledList;
-  int enabledCount = 0;
-
-  for (int i = 0; i < PAGES; i++) {
-    if (g_show[i]) {
-      if (enabledList.length()) enabledList += ", ";
-      enabledList += names[i];
-      enabledCount++;
-    } else {
-      if (disabledList.length()) disabledList += ", ";
-      disabledList += names[i];
-    }
-  }
-
-  // --------- Countdown ---------
-  int cdCount = 0;
-  String cdNames;
-
-  for (int i = 0; i < 8; i++) {
-    if (cd[i].name.length() == 0 && cd[i].whenISO.length() == 0) continue;
-    cdCount++;
-    if (cdNames.length()) cdNames += ", ";
-
-    String nn = cd[i].name;
-    if (nn.length() > 24) nn.remove(24);
-    cdNames += sanitizeText(nn);
-  }
-
-  // --------- HTML ----------
-  String page;
-  page.reserve(4096);
+  page.reserve(16000);
 
   page += "<!doctype html><html><head>"
           "<meta charset='utf-8'/>"
           "<meta name='viewport' content='width=device-width,initial-scale=1'/>"
-          "<title>"
-          + String(t_title) + "</title>"
-                              "<style>"
-                              "body{margin:0;font-family:-apple-system,BlinkMacSystemFont,system-ui,sans-serif;"
-                              "background:#050814;color:#f5f5f7;}"
-                              "main{max-width:720px;margin:0 auto;padding:18px 14px 32px;}"
-                              "h1{margin:0 0 8px;font-size:1.4rem;color:#ffdf40;}"
-                              "p{margin:4px 0;font-size:.9rem;color:#d8ddff;}"
-                              ".card{background:#0b1020;border-radius:16px;border:1px solid #191f3b;"
-                              "padding:14px 16px;margin-top:12px;box-shadow:0 10px 26px rgba(0,0,0,.45);}"
-                              ".label{font-size:.78rem;color:#9ca2ff;text-transform:uppercase;letter-spacing:.06em;}"
-                              ".value{font-size:.95rem;}"
-                              "a{color:#ffdf40;text-decoration:none;font-weight:500;}"
-                              "a:hover{text-decoration:underline;}"
-                              ".kv{margin:2px 0;}"
-                              ".kv b{display:inline-block;min-width:130px;}"
-                              "</style></head><body><main>";
+          "<title>" + String(t_title) + "</title>"
+          "<style>"
+          ":root{color-scheme:dark}"
+          "*{box-sizing:border-box}"
+          "html{scroll-behavior:smooth}"
+          "body{margin:0;font-family:-apple-system,BlinkMacSystemFont,system-ui,sans-serif;background:#050814;color:#f5f5f7}"
+          "header{position:sticky;top:0;z-index:20;background:linear-gradient(135deg,#0b1020,#071537);padding:13px 16px 10px;border-bottom:1px solid #20274a}"
+          "header h1{margin:0;font-size:1.35rem;color:#ffdf40}"
+          "header p{margin:2px 0 0;font-size:.8rem;color:#b3b7ff}"
+          "main{max-width:980px;margin:0 auto;padding:10px 10px 96px}"
+          ".jump{display:flex;gap:7px;overflow:auto;padding:8px 4px 3px;white-space:nowrap;scrollbar-width:none}"
+          ".jump a{padding:6px 10px;border:1px solid #2b3359;border-radius:999px;color:#dbe0ff;text-decoration:none;font-size:.78rem;background:#080d1c}"
+          ".alert{border-radius:10px;padding:10px 12px;font-size:.85rem;margin:10px 4px 14px}"
+          ".alert.ok{background:#102a1b;border:1px solid #1f8b3b;color:#b4f3c4}"
+          ".alert.warn{background:#2a1710;border:1px solid #e26f3b;color:#ffd2b6}"
+          ".card{background:#0b1020;border:1px solid #191f3b;border-radius:16px;padding:16px;margin:10px 4px;box-shadow:0 10px 26px rgba(0,0,0,.45)}"
+          ".card h3{margin:0 0 5px;font-size:1rem;color:#ffdf40}.card h4{margin:16px 0 6px;font-size:.9rem;color:#dce1ff}"
+          ".desc{margin:4px 0 10px;font-size:.8rem;color:#a9afff}"
+          ".grid-2{display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:10px}"
+          ".row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto;gap:9px;align-items:end;padding:8px 0;border-bottom:1px solid #171d38}"
+          ".grid-pages{display:flex;flex-wrap:wrap;gap:8px}"
+          "label.field{display:block;margin:9px 0 4px;font-size:.8rem;color:#b3b8ff}"
+          "input[type=text],input[type=password],input[type=number],input[type=datetime-local],select,textarea{width:100%;padding:9px 10px;border-radius:10px;border:1px solid #313855;background:#070b18;color:#f5f5f7;font:inherit;font-size:.92rem}"
+          "input:focus,select:focus,textarea:focus{outline:none;border-color:#5b7cff;box-shadow:0 0 0 1px #5b7cff55}"
+          ".chk{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid #232949;border-radius:10px;font-size:.88rem;background:#070b18;margin-top:8px}.chk input{width:auto;margin:0}"
+          ".page-chip input,.rot input{position:absolute;opacity:0;pointer-events:none}"
+          ".page-chip span,.rot span{display:inline-block;padding:8px 11px;border:1px solid #30385f;border-radius:999px;background:#070b18;color:#cfd5ff;font-size:.84rem;cursor:pointer;user-select:none}"
+          ".page-chip input:checked+span,.rot input:checked+span{background:#26201a;border-color:#ffb740;color:#ffdf40;box-shadow:inset 0 0 0 1px #ffdf4030}"
+          ".mini-actions{display:flex;gap:7px;flex-wrap:wrap;margin:8px 0}.mini-btn,.test-btn,.remove-cd{border:1px solid #3b436e;border-radius:999px;padding:7px 11px;background:#0a1022;color:#dce1ff;font-size:.79rem;cursor:pointer}"
+          ".remove-cd{border-radius:9px;padding:9px 11px;color:#ffb8b8}"
+          ".page-count{font-size:.8rem;color:#9fa6dc;margin-left:4px}"
+          ".rotations{display:flex;gap:7px;flex-wrap:wrap}"
+          ".advanced{margin-top:8px;padding-top:4px}.advanced summary{cursor:pointer;color:#aeb6ff;font-size:.82rem}"
+          ".integration{padding:11px 0;border-bottom:1px solid #171d38}.integration:last-child{border-bottom:0}.integration-head{display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap}"
+          ".integration-name{font-weight:600}.status{font-size:.72rem;border-radius:999px;padding:3px 7px}.status.on{background:#12301d;color:#aef0bd}.status.off{background:#272b3d;color:#aeb3cc}"
+          ".test-result{display:block;min-height:1.1em;margin-top:5px;font-size:.78rem;color:#aeb6ff}.test-result.ok{color:#aef0bd}.test-result.bad{color:#ffb8b8}"
+          ".footer-bar{position:fixed;left:0;right:0;bottom:0;z-index:30;background:#050814f2;border-top:1px solid #22284a;padding:8px 10px;backdrop-filter:blur(8px)}"
+          ".footer-inner{max-width:980px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;gap:10px}.dirty{font-size:.78rem;color:#9198bd}.dirty.on{color:#ffdf40}"
+          ".btn-primary{border:0;border-radius:999px;padding:10px 20px;font-size:.9rem;font-weight:700;background:linear-gradient(135deg,#ffdf40,#ff7a40);color:#111;cursor:pointer}"
+          ".btn-secondary{display:inline-block;border-radius:999px;padding:8px 14px;font-size:.84rem;border:1px solid #3b436e;background:transparent;color:#d6dcff;text-decoration:none;cursor:pointer}"
+          ".footer-actions{display:flex;align-items:center;gap:8px}"
+          "@media(max-width:620px){main{padding-left:6px;padding-right:6px}.card{margin-left:2px;margin-right:2px}.row{grid-template-columns:1fr}.remove-cd{justify-self:start}.footer-inner{flex-direction:column;align-items:stretch;gap:5px}.footer-inner .dirty{display:block;text-align:center}.footer-actions{width:100%}.footer-actions .btn-primary{flex:1}.footer-actions .btn-secondary{padding:8px 10px;font-size:.76rem}.grid-2{display:block}}"
+          "</style></head><body>";
 
-  page += "<h1>" + String(t_title) + "</h1>";
+  page += "<header><h1>" + String(t_title) + "</h1><p>Gat Multi Ticker — SquaredCoso</p></header><main>";
+  page += "<nav class='jump'>"
+          "<a href='#general'>" + String(it ? "Generale" : "General") + "</a>"
+          "<a href='#display'>Display</a>"
+          "<a href='#integrations'>" + String(it ? "Integrazioni" : "Integrations") + "</a>"
+          "<a href='#countdowns'>Countdown</a>"
+          "<a href='#notes'>Post-it</a>"
+          "</nav>";
+  page += notice;
 
-  // ------------------------------------------------------------------
-  // CARD 1 — PROFILO PANNELLO
-  // ------------------------------------------------------------------
-  page += "<div class='card'><div class='label'>" + String(t_profile) + "</div><p class='value'>";
+  page += "<form id='settingsForm' method='POST' action='/settings'>";
 
-  page += "<div class='kv'><b>" + String(t_city) + ":</b> " + sanitizeText(g_city) + "</div>";
-  page += "<div class='kv'><b>" + String(t_lang_label) + ":</b> " + sanitizeText(g_lang) + "</div>";
-  page += "<div class='kv'><b>" + String(t_fiat) + ":</b> " + sanitizeText(g_fiat) + "</div>";
-  page += "<div class='kv'><b>" + String(t_ics) + ":</b> " + (g_ics.length() ? sanitizeText(g_ics) : String("-")) + "</div>";
+  page += "<section id='general' class='card'><h3>" + String(it ? "Generale" : "General") + "</h3>";
+  page += "<div class='grid-2'><div>";
+  page += "<label class='field'>" + String(it ? "Città (meteo / aria)" : "City (weather / air)") + "</label>"
+          "<input name='city' type='text' value='" + htmlEscape(g_city) + "'>";
+  page += "<label class='field'>" + String(it ? "Lingua interfaccia" : "UI language") + "</label><select name='lang'>"
+          "<option value='it'" + String(g_lang=="it" ? " selected" : "") + ">Italiano</option>"
+          "<option value='en'" + String(g_lang=="en" ? " selected" : "") + ">English</option></select>";
+  page += "</div><div>";
+  page += "<label class='field'>" + String(it ? "Valuta base" : "Base currency") + "</label>"
+          "<input name='fiat' type='text' maxlength='3' value='" + htmlEscape(g_fiat) + "'>";
+  page += "<p class='desc'>" + String(it ? "Codice ISO a 3 lettere, per esempio CHF o EUR." : "3-letter ISO code, for example CHF or EUR.") + "</p>";
+  page += "</div></div></section>";
 
-  page += "</p></div>";
-
-  // ------------------------------------------------------------------
-  // CARD 2 — ROTAZIONE PAGINE
-  // ------------------------------------------------------------------
-  page += "<div class='card'><div class='label'>" + String(t_pages_card) + "</div><p class='value'>";
-
-  page += "<div class='kv'><b>" + String(t_pages_int) + ":</b> " + String(s) + " s</div>";
-
-  page += "<div class='kv'><b>" + String(t_pages_on) + ":</b> " + (enabledList.length() ? enabledList : String("-")) + "</div>";
-
-  page += "<div class='kv'><b>" + String(t_pages_off) + ":</b> " + (disabledList.length() ? disabledList : String("-")) + "</div>";
-
-  page += "<div class='kv'><b>" + String(it ? "Totale pagine attive" : "Total active pages") + ":</b> " + String(enabledCount) + " / " + String(PAGES) + "</div>";
-
-  page += "</p></div>";
-
-  // ------------------------------------------------------------------
-  // CARD 3 — DATI & INTEGRAZIONI
-  // ------------------------------------------------------------------
-  page += "<div class='card'><div class='label'>" + String(t_data) + "</div><p class='value'>";
-
-  // QOD
-  page += "<div class='kv'><b>" + String(t_qod_label) + ":</b> ";
-  if (g_oa_key.length())
-    page += String(t_qod_src_ai) + sanitizeText(g_oa_topic) + ")";
-  else
-    page += String(t_qod_src_zen);
-  page += "</div>";
-
-  // BTC
-  page += "<div class='kv'><b>" + String(t_btc_label) + ":</b> ";
-  if (!isnan(g_btc_owned))
-    page += String(g_btc_owned, 8) + " BTC";
-  else
-    page += "-";
-  page += "</div>";
-
-  // RSS
-  page += "<div class='kv'><b>" + String(t_rss_label) + ":</b> " + (g_rss_url.length() ? sanitizeText(g_rss_url) : String("-")) + "</div>";
-
-  // HA
-  page += "<div class='kv'><b>" + String(t_ha_label) + ":</b> ";
-  if (g_ha_ip.length() || g_ha_token.length()) {
-    page += "<br/><b>" + String(t_ha_ip) + ":</b> " + (g_ha_ip.length() ? sanitizeText(g_ha_ip) : String("-"));
-    page += "<br/><b>" + String(t_ha_token) + ":</b> " + (g_ha_token.length() ? (it ? "impostato" : "set") : String(t_ha_missing));
-  } else {
-    page += String(t_ha_missing);
+  page += "<section id='display' class='card'><h3>Display</h3><div class='grid-2'><div>";
+  page += "<label class='field'>" + String(it ? "Intervallo cambio pagina (secondi)" : "Page switch interval (seconds)") + "</label>"
+          "<input name='page_s' type='number' min='5' max='600' value='" + String(page_s) + "'>";
+  page += "<label class='field'>" + String(it ? "Orientamento" : "Orientation") + "</label><div class='rotations'>";
+  for (uint8_t r=0; r<4; r++) {
+    page += "<label class='rot'><input type='radio' name='rotation' value='" + String(r) + "'";
+    if (g_rotation==r) page += " checked";
+    page += "><span>" + String(r*90) + "&deg;</span></label>";
   }
   page += "</div>";
+  page += checkbox("splash_enabled", g_splash_enabled, it ? "Mostra immagini splash" : "Enable splash images");
+  page += "</div><div>";
+  page += "<label class='field'>" + String(it ? "Fuso orario" : "Timezone") + "</label><select id='tzPreset' name='tz_preset'>"
+          "<option value='europe'" + String(tzEurope ? " selected" : "") + ">" + String(it ? "Europa centrale (Svizzera / Italia)" : "Central Europe (Switzerland / Italy)") + "</option>"
+          "<option value='utc'" + String(tzUTC ? " selected" : "") + ">UTC</option>"
+          "<option value='custom'" + String(tzCustom ? " selected" : "") + ">" + String(it ? "Personalizzato" : "Custom") + "</option></select>";
+  page += "<details class='advanced'" + String(tzCustom ? " open" : "") + "><summary>" + String(it ? "Configurazione avanzata POSIX" : "Advanced POSIX configuration") + "</summary>"
+          "<label class='field'>POSIX TZ</label><input id='tzCustom' name='tz_custom' type='text' value='" + htmlEscape(g_tz_rule) + "'>"
+          "<p class='desc'>CET-1CEST,M3.5.0,M10.5.0/3</p></details>";
+  page += "</div></div>";
 
-  page += "</p></div>";
+  page += "<h4>" + String(it ? "Pagine visibili" : "Visible pages") + " <span id='pageCount' class='page-count'></span></h4>";
+  page += "<div class='mini-actions'><button class='mini-btn' type='button' id='pagesAll'>" + String(it ? "Attiva tutte" : "Enable all") + "</button>"
+          "<button class='mini-btn' type='button' id='pagesNone'>" + String(it ? "Disattiva tutte" : "Disable all") + "</button></div>";
+  page += "<div class='grid-pages'>";
+  page += pageChip("p_WEATHER", g_show[P_WEATHER], it ? "Meteo" : "Weather");
+  page += pageChip("p_AIR", g_show[P_AIR], it ? "Qualità aria" : "Air quality");
+  page += pageChip("p_CLOCK", g_show[P_CLOCK], it ? "Orologio" : "Clock");
+  page += pageChip("p_BINARY", g_show[P_BINARY], "Binary Clock");
+  page += pageChip("p_CAL", g_show[P_CAL], it ? "Calendario" : "Calendar");
+  page += pageChip("p_BTC", g_show[P_BTC], "Bitcoin");
+  page += pageChip("p_QOD", g_show[P_QOD], it ? "Frase del giorno" : "Quote");
+  page += pageChip("p_INFO", g_show[P_INFO], "Info");
+  page += pageChip("p_COUNT", g_show[P_COUNT], "Countdown");
+  page += pageChip("p_FX", g_show[P_FX], it ? "Valute" : "FX");
+  page += pageChip("p_T24", g_show[P_T24], it ? "Temp 7 giorni" : "Temp 7 days");
+  page += pageChip("p_SUN", g_show[P_SUN], it ? "Ore di luce" : "Sunlight");
+  page += pageChip("p_NEWS", g_show[P_NEWS], "News");
+  page += pageChip("p_HA", g_show[P_HA], "Home Assistant");
+  page += pageChip("p_STELLAR", g_show[P_STELLAR], it ? "Sistema Solare" : "Solar System");
+  page += pageChip("p_NOTES", g_show[P_NOTES], it ? "Post-it" : "Sticky Note");
+  page += pageChip("p_CHRONOS", g_show[P_CHRONOS], "Chronos");
+  page += "</div><span id='pageWarning' class='test-result'></span></section>";
 
-  // ------------------------------------------------------------------
-  // CARD 4 — COUNTDOWN
-  // ------------------------------------------------------------------
-  page += "<div class='card'><div class='label'>" + String(t_cd_card) + "</div><p class='value'>";
+  page += "<section id='integrations' class='card'><h3>" + String(it ? "Integrazioni" : "Integrations") + "</h3>"
+          "<p class='desc'>" + String(it ? "I pulsanti Test verificano la connessione senza salvare modifiche non ancora confermate." : "Test buttons check the currently saved connection without saving pending edits.") + "</p>";
 
-  if (cdCount == 0) {
-    page += t_cd_none;
-  } else {
-    page += "<div class='kv'><b>" + String(t_cd_count) + ":</b> " + String(cdCount) + " / 8</div>";
+  page += "<div class='integration'><div class='integration-head'><div><span class='integration-name'>" + String(it ? "Calendario ICS" : "ICS Calendar") + "</span> " + statusPill(g_ics.length(),it) + "</div>"
+          "<button type='button' class='test-btn' data-test='ics'>Test</button></div>"
+          "<label class='field'>URL ICS</label><input name='ics' type='text' value='" + htmlEscape(g_ics) + "'>"
+          "<span id='test-ics' class='test-result'></span></div>";
 
-    page += "<div class='kv'><b>" + String(t_cd_list) + ":</b> " + cdNames + "</div>";
+  page += "<div class='integration'><div class='integration-head'><div><span class='integration-name'>RSS News</span> " + statusPill(g_rss_url.length(),it) + "</div>"
+          "<button type='button' class='test-btn' data-test='rss'>Test</button></div>"
+          "<label class='field'>RSS feed URL</label><input name='rss_url' type='text' value='" + htmlEscape(g_rss_url) + "'>"
+          "<span id='test-rss' class='test-result'></span></div>";
+
+  page += "<div class='integration'><div class='integration-head'><div><span class='integration-name'>OpenAI</span> " + statusPill(g_oa_key.length(),it) + "</div>"
+          "<button type='button' class='test-btn' data-test='openai'>Test</button></div>"
+          "<label class='field'>OpenAI API Key</label><input name='openai_key' type='password' value='' placeholder='" +
+          String(g_oa_key.length() ? (it ? "già configurata - lascia vuoto per mantenerla" : "already set - leave blank to keep") : "") + "'>";
+  if (g_oa_key.length()) page += checkbox("clear_openai_key", false, it ? "Cancella chiave OpenAI" : "Clear OpenAI key");
+  page += "<label class='field'>" + String(it ? "Argomento frase" : "Quote topic") + "</label><input name='openai_topic' type='text' value='" + htmlEscape(g_oa_topic) + "'>"
+          "<div class='mini-actions'><button id='forceQod' type='button' class='btn-secondary'>" + String(it ? "Richiedi nuova frase ora" : "Get new quote now") + "</button></div>"
+          "<span id='qod-result' class='test-result'></span><span id='test-openai' class='test-result'></span></div>";
+
+  page += "<div class='integration'><div class='integration-head'><div><span class='integration-name'>Home Assistant</span> " + statusPill(g_ha_token.length(),it) + "</div>"
+          "<button type='button' class='test-btn' data-test='ha'>Test</button></div>"
+          "<label class='field'>IP</label><input name='ha_ip' type='text' value='" + htmlEscape(g_ha_ip) + "'>"
+          "<label class='field'>Token</label><input name='ha_token' type='password' value='' placeholder='" +
+          String(g_ha_token.length() ? (it ? "già configurato - lascia vuoto per mantenerlo" : "already set - leave blank to keep") : "") + "'>";
+  if (g_ha_token.length()) page += checkbox("clear_ha_token", false, it ? "Cancella token HA" : "Clear HA token");
+  page += "<label class='field'>" + String(it ? "Entità da mostrare (CSV, opzionale)" : "Entities to show (CSV, optional)") + "</label>"
+          "<input name='ha_entities' type='text' value='" + htmlEscape(g_ha_entities) + "'>"
+          "<p class='desc'>" + String(it ? "Esempio: light.sala,sensor.temperatura. Vuoto = filtro automatico." : "Example: light.living_room,sensor.temperature. Empty = automatic filter.") + "</p>"
+          "<span id='test-ha' class='test-result'></span></div>";
+
+  page += "<div class='integration'><div class='integration-head'><div><span class='integration-name'>Bitcoin</span></div></div>"
+          "<label class='field'>" + String(it ? "Quantità di BTC posseduti" : "Owned BTC amount") + "</label>"
+          "<input name='btc_owned' type='number' step='0.00000001' value='";
+  if (!isnan(g_btc_owned)) page += String(g_btc_owned,8);
+  page += "'></div></section>";
+
+  page += "<section id='countdowns' class='card'><h3>" + String(it ? "Countdown" : "Countdowns") + " <span id='cdCount' class='page-count'></span></h3>"
+          "<p class='desc'>" + String(it ? "Vengono mostrati solo gli slot utilizzati. Massimo 8." : "Only used slots are shown. Maximum 8.") + "</p>"
+          "<div id='countdownRows'>";
+  int firstHidden = -1;
+  for (int i=0;i<8;i++) {
+    bool used = cd[i].name.length() || cd[i].whenISO.length();
+    if (!used && firstHidden < 0) firstHidden = i;
+    page += "<div class='row cd-row' data-slot='" + String(i) + "'";
+    if (!used) page += " hidden";
+    page += "><div><label class='field'>" + String(it ? "Nome" : "Name") + "</label>"
+            "<input name='cd" + String(i+1) + "n' type='text' value='" + htmlEscape(cd[i].name) + "'></div>"
+            "<div><label class='field'>" + String(it ? "Data/ora" : "Date/time") + "</label>"
+            "<input name='cd" + String(i+1) + "t' type='datetime-local' value='" + htmlEscape(cd[i].whenISO) + "'></div>"
+            "<button type='button' class='remove-cd' title='" + String(it ? "Rimuovi" : "Remove") + "'>&times;</button></div>";
   }
+  page += "</div><div class='mini-actions'><button id='addCountdown' type='button' class='mini-btn'>+ " + String(it ? "Aggiungi countdown" : "Add countdown") + "</button></div></section>";
 
-  page += "</p></div>";
+  page += "<section id='notes' class='card'><h3>Post-it</h3>"
+          "<label class='field'>" + String(it ? "Testo del post-it" : "Note text") + "</label>"
+          "<textarea name='note' rows='4'>" + htmlEscape(g_note) + "</textarea>"
+          "<p class='desc'>" + String(it ? "Lascia vuoto per cancellarlo." : "Leave empty to remove it.") + "</p></section>";
 
-  // link impostazioni
-  page += "<p style='margin-top:16px'><a href='/settings'>" + String(t_settings) + "</a></p>";
+  page += "</main><div class='footer-bar'><div class='footer-inner'>"
+          "<span id='dirtyState' class='dirty'>" + String(it ? "Nessuna modifica" : "No changes") + "</span>"
+          "<div class='footer-actions'><button class='btn-primary' type='submit'>" + String(t_savebtn) + "</button>"
+          "<a class='btn-secondary' href='/'>" + String(t_home) + "</a></div></div></div></form>";
 
-  page += "</main></body></html>";
+  page += "<script>(function(){"
+          "const f=document.getElementById('settingsForm'),dirty=document.getElementById('dirtyState');"
+          "function markDirty(){dirty.textContent='" + String(it ? "● Modifiche non salvate" : "● Unsaved changes") + "';dirty.classList.add('on')}"
+          "f.addEventListener('input',markDirty);f.addEventListener('change',markDirty);"
+          "const boxes=[...document.querySelectorAll('.page-toggle')],pc=document.getElementById('pageCount'),pw=document.getElementById('pageWarning');"
+          "function pageCount(){const n=boxes.filter(b=>b.checked).length;pc.textContent=n+' / '+boxes.length+' " + String(it ? "attive" : "active") + "';return n}"
+          "boxes.forEach(b=>b.addEventListener('change',()=>{if(pageCount()===0){b.checked=true;pageCount();pw.textContent='" + String(it ? "Deve rimanere attiva almeno una pagina." : "At least one page must stay active.") + "';pw.className='test-result bad'}else{pw.textContent=''}}));"
+          "document.getElementById('pagesAll').onclick=()=>{boxes.forEach(b=>b.checked=true);pageCount();markDirty()};"
+          "document.getElementById('pagesNone').onclick=()=>{boxes.forEach(b=>b.checked=false);const clock=boxes.find(b=>b.name==='p_CLOCK');if(clock)clock.checked=true;pageCount();pw.textContent='" + String(it ? "Orologio lasciato attivo: non è possibile avere zero pagine." : "Clock left enabled: zero active pages is not allowed.") + "';pw.className='test-result';markDirty()};pageCount();"
+          "const rows=[...document.querySelectorAll('.cd-row')],add=document.getElementById('addCountdown'),cc=document.getElementById('cdCount');"
+          "function cdCount(){const n=rows.filter(r=>!r.hidden).length;cc.textContent=n+' / 8';add.disabled=n>=8;add.style.opacity=n>=8?'.45':'1'}"
+          "add.onclick=()=>{const r=rows.find(x=>x.hidden);if(r){r.hidden=false;cdCount();markDirty();const i=r.querySelector('input');if(i)i.focus()}};"
+          "rows.forEach(r=>r.querySelector('.remove-cd').onclick=()=>{r.querySelectorAll('input').forEach(i=>i.value='');r.hidden=true;cdCount();markDirty()});cdCount();"
+          "const tz=document.getElementById('tzPreset'),tzd=document.querySelector('.advanced');tz.addEventListener('change',()=>{if(tz.value==='custom')tzd.open=true;markDirty()});"
+          "const fq=document.getElementById('forceQod');if(fq)fq.onclick=async()=>{const o=document.getElementById('qod-result');fq.disabled=true;o.className='test-result';o.textContent='" + String(it ? "Generazione in corso…" : "Generating…") + "';try{const r=await fetch('/force_qod',{method:'POST',cache:'no-store'});const t=await r.text();o.textContent=(r.ok?'✓ ':'✕ ')+t;o.className='test-result '+(r.ok?'ok':'bad')}catch(e){o.textContent='✕ " + String(it ? "Errore di rete" : "Network error") + "';o.className='test-result bad'}fq.disabled=false};"
+          "document.querySelectorAll('.test-btn').forEach(btn=>btn.onclick=async()=>{const k=btn.dataset.test,o=document.getElementById('test-'+k);btn.disabled=true;o.className='test-result';o.textContent='" + String(it ? "Test in corso…" : "Testing…") + "';try{const r=await fetch('/test_integration?kind='+encodeURIComponent(k),{cache:'no-store'});const t=await r.text();o.textContent=(r.ok?'✓ ':'✕ ')+t;o.className='test-result '+(r.ok?'ok':'bad')}catch(e){o.textContent='✕ " + String(it ? "Errore di rete" : "Network error") + "';o.className='test-result bad'}btn.disabled=false});"
+          "})();</script></body></html>";
 
   return page;
 }
 
+static String htmlHome() {
+  const bool it = (g_lang == "it");
 
+  static const char* names_it[PAGES] = {
+    "Meteo","Aria","Orologio","Orologio Binario","Calendario","Bitcoin",
+    "Frase del giorno","Info","Countdown","Valute","Temp 7 giorni","Ore di luce",
+    "News","Home Assistant","Sistema Solare","Post-it","Chronos"
+  };
+  static const char* names_en[PAGES] = {
+    "Weather","Air","Clock","Binary Clock","Calendar","Bitcoin",
+    "Quote of the Day","Info","Countdown","FX","Temp 7 days","Sunlight",
+    "News","Home Assistant","Solar System","Sticky Note","Chronos"
+  };
+  const char** names = it ? names_it : names_en;
 
-/* ---------------------------------------------------------------------------
-   STA — ROOT HANDLER
---------------------------------------------------------------------------- */
+  int enabledCount=0, cdCount=0;
+  String pageChips, cdItems;
+  for (int i=0;i<PAGES;i++) {
+    if (!g_show[i]) continue;
+    enabledCount++;
+    pageChips += "<span class='chip'>" + htmlEscape(String(names[i])) + "</span>";
+  }
+  for (int i=0;i<8;i++) {
+    if (!cd[i].name.length() && !cd[i].whenISO.length()) continue;
+    cdCount++;
+    String n=cd[i].name.length()?cd[i].name:String(it?"Senza nome":"Unnamed");
+    if (n.length()>32) n.remove(32);
+    cdItems += "<div class='cd'><b>" + htmlEscape(n) + "</b>";
+    if (cd[i].whenISO.length()) cdItems += "<span>" + htmlEscape(cd[i].whenISO) + "</span>";
+    cdItems += "</div>";
+  }
+
+  char ver[32];
+  strcpy_P(ver, FW_VERSION);
+  int32_t rssi=WiFi.RSSI();
+  String signal = rssi >= -55 ? (it ? "ottimo" : "excellent")
+                : rssi >= -67 ? (it ? "buono" : "good")
+                : rssi >= -75 ? (it ? "debole" : "weak")
+                              : (it ? "molto debole" : "very weak");
+
+  String page;
+  page.reserve(7000);
+  page += "<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
+          "<title>SquaredCoso</title><style>"
+          ":root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,system-ui,sans-serif;background:#050814;color:#f5f5f7}"
+          "main{max-width:820px;margin:0 auto;padding:18px 12px 34px}.hero{background:linear-gradient(135deg,#0b1020,#071537);border:1px solid #22294c;border-radius:18px;padding:18px;box-shadow:0 12px 30px #0007}"
+          ".hero-top{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.hero h1{margin:0;color:#ffdf40;font-size:1.5rem}.sub{color:#aeb5e8;font-size:.82rem;margin-top:4px}.online{display:inline-flex;align-items:center;gap:6px;background:#102a1b;color:#b4f3c4;border:1px solid #1f8b3b;border-radius:999px;padding:5px 9px;font-size:.75rem}.dot{width:7px;height:7px;border-radius:50%;background:#68e287}"
+          ".stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin-top:15px}.stat{background:#080d1c;border:1px solid #1c2444;border-radius:12px;padding:10px}.stat small{display:block;color:#8f97c7;font-size:.7rem;text-transform:uppercase}.stat b{display:block;margin-top:3px;font-size:.9rem}"
+          ".grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:10px;margin-top:10px}.card{background:#0b1020;border:1px solid #191f3b;border-radius:16px;padding:15px;box-shadow:0 10px 25px #0006}.card h2{margin:0 0 10px;color:#ffdf40;font-size:1rem}.kv{display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-bottom:1px solid #171d38;font-size:.84rem}.kv:last-child{border-bottom:0}.kv span:first-child{color:#9ea6d3}.kv span:last-child{text-align:right}"
+          ".chips{display:flex;flex-wrap:wrap;gap:6px}.chip{border:1px solid #30385f;border-radius:999px;background:#070b18;color:#dce1ff;padding:5px 8px;font-size:.75rem}.cd{display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid #171d38;font-size:.82rem}.cd:last-child{border-bottom:0}.cd span{color:#aab1dd;text-align:right}"
+          ".status{font-size:.71rem;border-radius:999px;padding:3px 7px}.status.on{background:#12301d;color:#aef0bd}.status.off{background:#272b3d;color:#aeb3cc}.integration-line{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid #171d38;font-size:.84rem}.integration-line:last-child{border-bottom:0}"
+          ".actions{margin-top:14px;display:flex;gap:8px;flex-wrap:wrap}.btn{display:inline-block;border-radius:999px;padding:9px 14px;text-decoration:none;font-size:.84rem}.primary{background:linear-gradient(135deg,#ffdf40,#ff7a40);color:#111;font-weight:700}.secondary{border:1px solid #3b436e;color:#d6dcff}"
+          "@media(max-width:520px){.hero-top{display:block}.online{margin-top:10px}.kv{display:block}.kv span{display:block!important;text-align:left!important;margin-top:2px}}"
+          "</style></head><body><main>";
+
+  page += "<section class='hero'><div class='hero-top'><div><h1>SquaredCoso</h1><div class='sub'>Gat Multi Ticker · " + htmlEscape(String(ver)) + "</div></div>"
+          "<span class='online'><span class='dot'></span>Online</span></div><div class='stats'>";
+  page += "<div class='stat'><small>IP</small><b>" + WiFi.localIP().toString() + "</b></div>";
+  page += "<div class='stat'><small>Wi-Fi</small><b>" + String(rssi) + " dBm · " + signal + "</b></div>";
+  page += "<div class='stat'><small>Uptime</small><b>" + uptimeCompact() + "</b></div>";
+  page += "<div class='stat'><small>Heap</small><b>" + String(ESP.getFreeHeap()/1024UL) + " KB</b></div>";
+  page += "</div></section>";
+
+  page += "<div class='grid'><section class='card'><h2>" + String(it?"Pannello":"Panel") + "</h2>"
+          "<div class='kv'><span>" + String(it?"Città":"City") + "</span><span>" + htmlEscape(g_city) + "</span></div>"
+          "<div class='kv'><span>" + String(it?"Lingua":"Language") + "</span><span>" + htmlEscape(g_lang) + "</span></div>"
+          "<div class='kv'><span>" + String(it?"Valuta":"Currency") + "</span><span>" + htmlEscape(g_fiat) + "</span></div>"
+          "<div class='kv'><span>" + String(it?"Rotazione":"Rotation") + "</span><span>" + String((g_rotation&3)*90) + "&deg;</span></div>"
+          "<div class='kv'><span>" + String(it?"Cambio pagina":"Page switch") + "</span><span>" + String(PAGE_INTERVAL_MS/1000UL) + " s</span></div></section>";
+
+  page += "<section class='card'><h2>" + String(it?"Integrazioni":"Integrations") + "</h2>"
+          "<div class='integration-line'><span>Calendario ICS</span>" + statusPill(g_ics.length(),it) + "</div>"
+          "<div class='integration-line'><span>RSS News</span>" + statusPill(g_rss_url.length(),it) + "</div>"
+          "<div class='integration-line'><span>OpenAI</span>" + statusPill(g_oa_key.length(),it) + "</div>"
+          "<div class='integration-line'><span>Home Assistant</span>" + statusPill(g_ha_token.length(),it) + "</div></section></div>";
+
+  page += "<section class='card'><h2>" + String(it?"Pagine":"Pages") + " · " + String(enabledCount) + " / " + String(PAGES) + "</h2><div class='chips'>" + pageChips + "</div></section>";
+
+  page += "<section class='card'><h2>Countdown · " + String(cdCount) + " / 8</h2>";
+  page += cdCount ? cdItems : String("<div class='sub'>") + (it?"Nessun countdown configurato.":"No countdown configured.") + "</div>";
+  page += "</section>";
+
+  page += "<div class='actions'><a class='btn primary' href='/settings'>" + String(it?"Apri impostazioni":"Open settings") + "</a></div>";
+  page += "</main></body></html>";
+  return page;
+}
+
 static void handleRootSTA() {
   web.send(200, "text/html; charset=utf-8", htmlHome());
 }
 
-/* ---------------------------------------------------------------------------
-   AP MODE — ROUTES
---------------------------------------------------------------------------- */
 static void startDNSCaptive() {
   dnsServer.start(DNS_PORT, "*", WiFi.softAPIP());
 }
@@ -774,13 +605,11 @@ static void startAPPortal() {
   web.begin();
 }
 
-/* ---------------------------------------------------------------------------
-   STA MODE — ROUTES
---------------------------------------------------------------------------- */
 static void startSTAWeb() {
   web.on("/", HTTP_GET, handleRootSTA);
   web.on("/settings", HTTP_ANY, handleSettings);
   web.on("/force_qod", HTTP_POST, handleForceQOD);
+  web.on("/test_integration", HTTP_GET, handleIntegrationTest);
   web.onNotFound(handleRootSTA);
   web.begin();
 }

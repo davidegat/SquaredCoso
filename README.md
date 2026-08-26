@@ -1,4 +1,4 @@
-# SquaredCoso 1.2.0 (Italiano / English)
+# SquaredCoso b1.3.0 (Italiano / English)
 
 ## Indice / Table of contents
 
@@ -30,6 +30,12 @@
 ## Introduzione
 
 **SquaredCoso** è un firmware per ESP32-S3 progettato per il pannello RGB 480×480 ST7701 (Panel-4848S040). Trasforma il display in una **bacheca informativa autonoma**, con pagine modulari che si alternano automaticamente e che sono completamente configurabili tramite interfaccia web.
+
+### Novità principali di b1.3.0
+
+* **Rotazione completa del display** a 0° / 90° / 180° / 270°, con touch sempre coerente con l'orientamento visuale.
+* **Cambio pagina manuale dal display**: tap sul bordo sinistro per tornare indietro, tap sul bordo destro per avanzare, tap centrale per aprire il menu.
+* **WebUI rinnovata**: dashboard più chiara, impostazioni riorganizzate e test rapidi delle integrazioni principali.
 
 Il dispositivo può mostrare:
 
@@ -98,13 +104,15 @@ Dopo la configurazione, il dispositivo passa in modalità **STA** e diventa ragg
 * Città e lingua
 * Coordinate o geocoding automatico
 * Intervallo di rotazione delle pagine
+* Orientamento display 0° / 90° / 180° / 270° con touch coerente
+* Regola fuso orario POSIX (default Europa centrale con ora legale)
 * Feed ICS
 * Feed RSS
 * Countdown
 * Impostazioni FX e BTC
 * Chiave OpenAI e argomento frase del giorno
 * Testo e colore per i post-it
-* IP/token Home Assistant
+* IP/token Home Assistant e lista opzionale di entity_id da monitorare
 * Pagine da visualizzare e parametri grafici
 
 Le impostazioni vengono salvate in NVS e persistono ai riavvii.
@@ -123,9 +131,13 @@ Il firmware gestisce in autonomia:
 
 Il dispositivo integra un **menu touch** che permette di gestire le pagine attive direttamente dallo schermo, senza dover accedere alla WebUI.
 
-### Come aprire il menu
+### Interazione durante la visualizzazione
 
-Tocca un punto qualsiasi dello schermo durante la visualizzazione normale. Si aprirà un overlay a tutto schermo con tema scuro.
+* **Tap sul margine destro**: passa alla pagina attiva successiva, saltando quelle disabilitate.
+* **Tap sul margine sinistro**: torna alla pagina attiva precedente, saltando quelle disabilitate.
+* **Tap nella zona centrale**: apre il menu touch delle pagine.
+
+La navigazione laterale è circolare e segue l'orientamento corrente del display (0° / 90° / 180° / 270°).
 
 ### Struttura del menu
 
@@ -214,7 +226,7 @@ Orbita terrestre vista dall'alto con stagioni e inclinazione.
 
 ### Info di sistema
 
-Uptime, rete, memoria, CPU, pagine attive.
+Versione firmware e indirizzo IP del dispositivo.
 
 ***
 
@@ -315,7 +327,7 @@ L'ESP32-S3 appare come porta seriale, l'upload funziona, ma il pannello resta se
 ## Non ricevo eventi del calendario ICS
 
 * Controlla che l'URL ICS sia corretto e pubblico.
-* La funzione ICS è ancora in sviluppo: alcuni calendari potrebbero dare problemi.
+* Il parser gestisce gli ICS più comuni, inclusi eventi UTC, all-day e righe folded; calendari con timezone non standard possono richiedere adattamenti.
 
 ## Altri controlli utili
 
@@ -338,6 +350,12 @@ Attribuzione richiesta: citare l'autore **Davide "gat" Nasato** e il repository 
 ## Introduction
 
 **SquaredCoso** is an ESP32-S3 firmware designed for the 480×480 ST7701 RGB panel (Panel-4848S040). It turns the display into a **stand‑alone information dashboard**, with modular pages rotating automatically and fully configurable through the WebUI.
+
+### Main improvements in b1.3.0
+
+* **Full display rotation** at 0° / 90° / 180° / 270°, with touch coordinates always matching the visible orientation.
+* **Manual page navigation on the display**: tap the left edge for the previous page, the right edge for the next page, and the center to open the menu.
+* **Refreshed WebUI** with a clearer dashboard, reorganized settings and quick tests for the main integrations.
 
 The device can display:
 
@@ -397,13 +415,15 @@ After configuration, it switches to **STA mode**, becomes reachable through its 
 * City and language
 * Coordinates or automatic geocoding
 * Page rotation interval
+* Display orientation 0° / 90° / 180° / 270° with matching touch coordinates
+* POSIX timezone rule (Central European time with DST by default)
 * ICS feed
 * RSS feed
 * Countdown timers
 * FX/BTC settings
 * OpenAI key and topic
 * Post-it content and color
-* Home Assistant IP/token
+* Home Assistant IP/token and optional entity_id list
 * Enabled pages and visual parameters
 
 Settings are saved to NVS and persist across reboots.
@@ -422,9 +442,13 @@ The firmware autonomously manages:
 
 The device includes a **touch menu** that allows you to manage active pages directly from the screen, without accessing the WebUI.
 
-### How to open the menu
+### Interaction during normal display
 
-Tap anywhere on the screen during normal display. A full-screen overlay with a dark theme will appear.
+* **Tap the right edge**: moves to the next enabled page, skipping disabled pages.
+* **Tap the left edge**: moves to the previous enabled page, skipping disabled pages.
+* **Tap the center area**: opens the touch page menu.
+
+Edge-tap navigation wraps around and follows the current display orientation (0° / 90° / 180° / 270°).
 
 ### Menu structure
 
@@ -513,7 +537,7 @@ Top‑down view of Earth orbit with seasonal position and axial tilt.
 
 ### System info
 
-Uptime, network details, memory, CPU, active pages.
+Firmware version and device IP address.
 
 ***
 
@@ -617,7 +641,7 @@ The ESP32‑S3 appears as a serial port, upload works, but the panel stays compl
 ## ICS calendar events missing
 
 * Check that the ICS URL is correct and publicly accessible.
-* ICS support is still evolving; certain calendars may behave inconsistently.
+* The parser handles common ICS feeds, including UTC, all-day events and folded lines; unusual timezone definitions may still require adjustments.
 
 ## Additional useful checks
 

@@ -1,38 +1,16 @@
-/*
-===============================================================================
-   SQUARED — DISPLAY HELPERS (Core grafico)
-   Descrizione: Inizializzazione pannello ST7701, gestione backlight con
-                fade-in/out, splash RLE 480×480, rendering testi (bold,
-                header, paragraph), sanitizzazione UTF-8, escape JSON,
-                helper data/ora, mini-parser JSON KV e funzioni paging
-                (mask ↔ array) condivise da tutte le pagine.
-   Autore: Davide “gat” Nasato
-   Repository: https://github.com/davidegat/SquaredCoso
-   Licenza: CC BY-NC 4.0
-===============================================================================
-*/
-
 #pragma once
 
 #include "globals.h"
 #include <Arduino.h>
 #include <Arduino_GFX_Library.h>
 
-// Display condiviso
 extern Arduino_RGB_Display *gfx;
 
-/* ============================================================================
-   BACKLIGHT (PWM su pin 38)
-============================================================================ */
 #define GFX_BL 38
 #define PWM_CHANNEL 0
 #define PWM_FREQ 1000
 #define PWM_BITS 8
 
-/* ============================================================================
-   drawRLE — Decodifica immagini RLE 480×480 RGB565 (splash/logo)
-   Ogni "run" contiene: colore + conteggio pixel consecutivi
-============================================================================ */
 inline void drawRLE(int x, int y, int w, int h, const RLERun *data,
                     size_t runs) {
   static uint16_t lineBuf[480];
@@ -64,9 +42,6 @@ inline void drawRLE(int x, int y, int w, int h, const RLERun *data,
   }
 }
 
-/* ============================================================================
-   FADE VELOCI (transizioni pagina)
-============================================================================ */
 inline void quickFadeOut() {
   const int maxDuty = (1 << PWM_BITS) - 1;
   for (int i = 50; i >= 0; i--) {
@@ -83,21 +58,15 @@ inline void quickFadeIn() {
   }
 }
 
-/* ============================================================================
-   Kickstart pannello ST7701 (inizializzazione sequenza)
-============================================================================ */
 inline void panelKickstart() {
   delay(50);
   gfx->begin();
-  gfx->setRotation(0);
+  gfx->setRotation(g_rotation & 3);
   delay(120);
   gfx->displayOn();
   delay(20);
 }
 
-/* ============================================================================
-   SPLASH pieni
-============================================================================ */
 inline void showSplashFadeInOnly(const RLERun *rle, size_t runs,
                                  uint16_t holdMs) {
   gfx->fillScreen(RGB565_BLACK);
@@ -108,7 +77,6 @@ inline void showSplashFadeInOnly(const RLERun *rle, size_t runs,
 
   const int maxDuty = (1 << PWM_BITS) - 1;
 
-  // fade-in lento
   for (int i = 0; i <= 500; i++) {
     ledcWrite(PWM_CHANNEL, (maxDuty * i) / 500);
     delay(5);
@@ -128,9 +96,6 @@ inline void splashFadeOut() {
   gfx->fillScreen(COL_BG);
 }
 
-/* ============================================================================
-   FADE-IN UI (dopo splash o cambio pagina)
-============================================================================ */
 inline void fadeInUI() {
   ledcSetup(PWM_CHANNEL, PWM_FREQ, PWM_BITS);
   ledcAttachPin(GFX_BL, PWM_CHANNEL);
@@ -144,9 +109,6 @@ inline void fadeInUI() {
   }
 }
 
-/* ============================================================================
-   Splash “cosino” per rotazione pagina (fade-in + hold)
-============================================================================ */
 inline void showCycleSplash(const RLERun *data, size_t runs, uint16_t holdMs) {
   gfx->fillScreen(RGB565_BLACK);
   drawRLE(0, 0, 480, 480, data, runs);
@@ -164,19 +126,14 @@ inline void showCycleSplash(const RLERun *data, size_t runs, uint16_t holdMs) {
   delay(holdMs);
 }
 
-/* ============================================================================
-   sanitizeText — converte UTF-8 accentate in ASCII safe
-   Usato da: News, Meteo, QOD
-============================================================================ */
 inline String sanitizeText(const String &in) {
   String out;
   out.reserve(in.length());
 
   for (int i = 0; i < in.length();) {
     uint8_t c = (uint8_t)in[i];
-
     if (c < 0x80) {
-      out += (char)c;
+      if (c >= 0x20 || c == '\n' || c == '\t') out += (char)c;
       i++;
       continue;
     }
@@ -184,30 +141,33 @@ inline String sanitizeText(const String &in) {
     if (c == 0xC3 && i + 1 < in.length()) {
       uint8_t c2 = (uint8_t)in[i + 1];
       switch (c2) {
-      case 0xA0:
-      case 0xA1:
-        out += 'a';
-        break;
-      case 0xA8:
-      case 0xA9:
-        out += 'e';
-        break;
-      case 0xAC:
-      case 0xAD:
-        out += 'i';
-        break;
-      case 0xB2:
-      case 0xB3:
-        out += 'o';
-        break;
-      case 0xB9:
-      case 0xBA:
-        out += 'u';
-        break;
-      default:
-        out += '?';
+        case 0x80: case 0x81: case 0x82: case 0x83: case 0x84: case 0x85:
+        case 0xA0: case 0xA1: case 0xA2: case 0xA3: case 0xA4: case 0xA5: out += 'a'; break;
+        case 0x88: case 0x89: case 0x8A: case 0x8B:
+        case 0xA8: case 0xA9: case 0xAA: case 0xAB: out += 'e'; break;
+        case 0x8C: case 0x8D: case 0x8E: case 0x8F:
+        case 0xAC: case 0xAD: case 0xAE: case 0xAF: out += 'i'; break;
+        case 0x92: case 0x93: case 0x94: case 0x95: case 0x96:
+        case 0xB2: case 0xB3: case 0xB4: case 0xB5: case 0xB6: out += 'o'; break;
+        case 0x99: case 0x9A: case 0x9B: case 0x9C:
+        case 0xB9: case 0xBA: case 0xBB: case 0xBC: out += 'u'; break;
+        case 0x87: case 0xA7: out += 'c'; break;
+        case 0x91: case 0xB1: out += 'n'; break;
+        case 0x9F: out += "ss"; break;
+        default: out += '?'; break;
       }
       i += 2;
+      continue;
+    }
+
+    if (c == 0xE2 && i + 2 < in.length() && (uint8_t)in[i + 1] == 0x80) {
+      uint8_t c3 = (uint8_t)in[i + 2];
+      if (c3 == 0x98 || c3 == 0x99) out += '\'';
+      else if (c3 == 0x9C || c3 == 0x9D) out += '"';
+      else if (c3 == 0x93 || c3 == 0x94) out += '-';
+      else if (c3 == 0xA6) out += "...";
+      else out += '?';
+      i += 3;
       continue;
     }
 
@@ -215,16 +175,11 @@ inline String sanitizeText(const String &in) {
     i++;
   }
 
-  while (out.indexOf("  ") >= 0)
-    out.replace("  ", " ");
+  while (out.indexOf("  ") >= 0) out.replace("  ", " ");
   out.trim();
   return out;
 }
 
-/* ============================================================================
-   decodeJsonUnicode — converte sequenze \uXXXX in UTF-8 reale
-   Usato nel parsing OpenAI JSON
-============================================================================ */
 inline String decodeJsonUnicode(const String &s) {
   String out;
   out.reserve(s.length());
@@ -251,9 +206,6 @@ inline String decodeJsonUnicode(const String &s) {
   return out;
 }
 
-/* ============================================================================
-   jsonEscape — escape per body OpenAI
-============================================================================ */
 inline String jsonEscape(const String &s) {
   String o;
   o.reserve(s.length() + 8);
@@ -273,9 +225,6 @@ inline String jsonEscape(const String &s) {
   return o;
 }
 
-/* ============================================================================
-   TEXT RENDERING — bold offset 4px e paragrafi word-wrap
-============================================================================ */
 inline void drawBoldTextColored(int16_t x, int16_t y, const String &raw,
                                 uint16_t fg, uint16_t bg,
                                 uint8_t scale = TEXT_SCALE) {
@@ -302,10 +251,7 @@ inline void drawBoldMain(int16_t x, int16_t y, const String &raw) {
   drawBoldMain(x, y, raw, TEXT_SCALE);
 }
 
-/* ============================================================================
-   drawHeader — barra superiore con titolo pagina + ora corrente
-============================================================================ */
-inline String getFormattedDateTime(); // forward
+inline String getFormattedDateTime();
 
 inline void drawHeader(const String &titleRaw) {
   gfx->fillRect(0, 0, 480, 50, COL_HEADER);
@@ -319,25 +265,20 @@ inline void drawHeader(const String &titleRaw) {
   }
 }
 
-/* ============================================================================
-   drawHLine — linea orizzontale divisoria UI
-============================================================================ */
 inline void drawHLine(int y) {
   gfx->drawLine(PAGE_X, y, PAGE_X + PAGE_W, y, COL_DIVIDER);
 }
 
-/* ============================================================================
-   drawParagraph — testo multi-linea con word-wrap
-   NO background, solo colore testo
-============================================================================ */
 inline void drawParagraph(int16_t x, int16_t y, int16_t w, const String &text,
-                          uint8_t scale) {
+                          uint8_t scale, uint16_t fg = COL_TEXT,
+                          uint16_t bg = COL_BG) {
   int maxChars = w / (BASE_CHAR_W * scale);
   if (maxChars < 8)
     maxChars = 8;
 
   gfx->setTextSize(scale);
-  gfx->setTextColor(COL_TEXT, COL_TEXT); // nessuno sfondo visibile
+  if (fg == bg) gfx->setTextColor(fg);
+  else gfx->setTextColor(fg, bg);
 
   String s = sanitizeText(text);
   int start = 0;
@@ -346,7 +287,6 @@ inline void drawParagraph(int16_t x, int16_t y, int16_t w, const String &text,
     int len = min(maxChars, (int)s.length() - start);
     int cut = start + len;
 
-    // cerca spazio precedente per evitare spezzature brutte
     if (cut < s.length()) {
       int sp = s.lastIndexOf(' ', cut);
       if (sp > start)
@@ -367,9 +307,6 @@ inline void drawParagraph(int16_t x, int16_t y, int16_t w, const String &text,
   }
 }
 
-/* ============================================================================
-   DATE HELPERS
-============================================================================ */
 inline String getFormattedDateTime() {
   extern bool g_timeSynced;
   if (!g_timeSynced)
@@ -406,9 +343,6 @@ inline String formatShortDate(time_t tt) {
   return String(buf);
 }
 
-/* ============================================================================
-   JSON HELPERS — mini-parser manuali
-============================================================================ */
 inline bool jsonFindStringKV(const String &body, const String &key, int from,
                              String &outVal) {
   String k = "\"" + key + "\"";
@@ -455,9 +389,6 @@ inline bool jsonFindIntKV(const String &body, const String &key, int from,
   return true;
 }
 
-/* ============================================================================
-   PAGING HELPERS — gestione pagine attive
-============================================================================ */
 extern bool g_show[];
 extern int g_page;
 

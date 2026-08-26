@@ -1,27 +1,12 @@
-/*
-===============================================================================
-   SQUARED — PAGINA "QOD" (Quote of the Day)
-   Descrizione: Generatore frase del giorno con doppia sorgente
-                (OpenAI o ZenQuotes), cache giornaliera, sanitizzazione
-                UTF-8, normalizzazione Unicode, word-wrap avanzato e
-                rendering su sfondo RLE personalizzato.
-   Autore: Davide “gat” Nasato
-   Repository: https://github.com/davidegat/SquaredCoso
-   Licenza: CC BY-NC 4.0
-===============================================================================
-*/
-
 #pragma once
 
 #include "../handlers/globals.h"
+#include "../handlers/tls_roots.h"
 #include "../images/qod.h"
 #include <Arduino.h>
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
 
-// -----------------------------------------------------------------------------
-// Risorse core
-// -----------------------------------------------------------------------------
 extern Arduino_RGB_Display *gfx;
 
 extern const int PAGE_X, PAGE_Y, PAGE_W, PAGE_H;
@@ -35,6 +20,7 @@ extern bool httpGET(const String &, String &, uint32_t);
 extern int indexOfCI(const String &, const String &, int);
 
 extern bool jsonKV(const String &, const char *, String &);
+extern bool jsonStringAfterKey(const String &, const char *, String &, int);
 
 extern String jsonEscape(const String &);
 extern String decodeJsonUnicode(const String &);
@@ -47,17 +33,11 @@ extern void drawCurrentPage();
 
 extern WebServer web;
 
-// -----------------------------------------------------------------------------
-// Cache QOD
-// -----------------------------------------------------------------------------
 static String qod_text;
 static String qod_author;
 static String qod_date_ymd;
 static bool qod_from_ai = false;
 
-// -----------------------------------------------------------------------------
-// Sanitize virgolette + normalizzazione Unicode
-// -----------------------------------------------------------------------------
 static String qodSanitizeQuotes(const String &in) {
   String s = in;
 
@@ -85,9 +65,6 @@ static String qodSanitizeQuotes(const String &in) {
   return s;
 }
 
-// -----------------------------------------------------------------------------
-// Fallback ZenQuotes
-// -----------------------------------------------------------------------------
 static bool fetchQOD_ZenQuotes() {
   String body;
   if (!httpGET("https://zenquotes.io/api/today", body, 10000))
@@ -109,16 +86,13 @@ static bool fetchQOD_ZenQuotes() {
   return true;
 }
 
-// -----------------------------------------------------------------------------
-// OpenAI
-// -----------------------------------------------------------------------------
 static bool fetchQOD_OpenAI() {
 
   if (!g_oa_key.length() || !g_oa_topic.length())
     return false;
 
   WiFiClientSecure client;
-  client.setInsecure();
+  client.setCACert(OPENAI_ROOT_CA);
 
   HTTPClient http;
   http.setTimeout(10000);
@@ -154,23 +128,14 @@ static bool fetchQOD_OpenAI() {
   String resp = http.getString();
   http.end();
 
-  int p = indexOfCI(resp, "\"text\"", 0);
-  if (p < 0)
-    return false;
+  // Parse the output_text item with escape-aware JSON string extraction.
+  int p = indexOfCI(resp, "\"output_text\"", 0);
+  if (p < 0) p = 0;
 
-  p = resp.indexOf('"', p + 6);
-  if (p < 0)
-    return false;
-
-  int q = resp.indexOf('"', p + 1);
-  if (q < 0)
-    return false;
-
-  String raw = resp.substring(p + 1, q);
-
-  raw = decodeJsonUnicode(raw);
-  raw.replace("\\n", " ");
-  raw.replace("\\", "");
+  String raw;
+  if (!jsonStringAfterKey(resp, "text", raw, p)) return false;
+  raw.replace("\n", " ");
+  raw.replace("\r", " ");
   raw.trim();
 
   qod_text = qodSanitizeQuotes(sanitizeText(raw));
@@ -182,9 +147,6 @@ static bool fetchQOD_OpenAI() {
   return qod_text.length() > 0;
 }
 
-// -----------------------------------------------------------------------------
-// Master fetch
-// -----------------------------------------------------------------------------
 static bool fetchQOD() {
 
   String today;
@@ -217,9 +179,6 @@ static bool fetchQOD() {
   return false;
 }
 
-// -----------------------------------------------------------------------------
-// WebUI: forza rigenerazione
-// -----------------------------------------------------------------------------
 static void handleForceQOD() {
 
   qod_text.clear();
@@ -227,22 +186,17 @@ static void handleForceQOD() {
   qod_date_ymd.clear();
   qod_from_ai = false;
 
-  fetchQOD();
-  drawCurrentPage();
+  bool ok = fetchQOD();
+  if (ok && g_page == P_QOD) drawCurrentPage();
 
-  web.send(200, "text/html; charset=utf-8",
-           "<!doctype html><meta charset='utf-8'><body>"
-           "<h3>Frase rigenerata</h3>"
-           "<p><a href='/settings'>Back</a></p>"
-           "</body>");
+  const bool it = (g_lang == "it");
+  web.send(ok ? 200 : 503, "text/plain; charset=utf-8",
+           ok ? (it ? "Nuova frase generata" : "New quote generated")
+              : (it ? "Generazione frase non riuscita" : "Quote generation failed"));
 }
 
-// -----------------------------------------------------------------------------
-// Rendering pagina
-// -----------------------------------------------------------------------------
 static void pageQOD() {
 
-  // SFONDO RLE
   drawRLE(0, 0, QOD_IMG_WIDTH, QOD_IMG_HEIGHT, qod_img, qod_img_count);
 
   drawHeader(g_lang == "it" ? "Frase del giorno" : "Quote of the Day");
@@ -263,7 +217,7 @@ static void pageQOD() {
   const uint16_t L = qod_text.length();
   const uint8_t scale = (L < 80 ? 4 : (L < 160 ? 3 : 2));
 
-  drawParagraph(PAGE_X, y, PAGE_W, full, scale);
+  drawParagraph(PAGE_X, y, PAGE_W, full, scale, 0x0000, 0x0000);
 
   String author = qod_author.length()
                       ? ("- " + qod_author)

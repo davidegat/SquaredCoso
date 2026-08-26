@@ -1,15 +1,3 @@
-/*
-===============================================================================
-   SQUARED — PAGINA "SUN & MOON"
-   Descrizione: Fetch ottimizzato di alba/tramonto, durata luce, UV index,
-                geocoding, moon phase via ICS, interpolazione illuminazione,
-                terminatore lunare realistico e rendering RLE ad alta qualità.
-   Autore: Davide “gat” Nasato
-   Repository: https://github.com/davidegat/SquaredCoso
-   Licenza: CC BY-NC 4.0
-===============================================================================
-*/
-
 #pragma once
 
 #include "../handlers/globals.h"
@@ -17,22 +5,21 @@
 #include <Arduino.h>
 #include <math.h>
 #include <time.h>
-// ============================================================================
-// Timezone helper
-// ============================================================================
-static inline long calcTZ();
 
-// ============================================================================
-// timegm per ESP32
-// ============================================================================
-static time_t timegm_esp32(struct tm *tm) {
-  time_t local = mktime(tm);      // interpreta tm come ora locale
-  return local - calcTZ() * 3600; // converti in UTC
+static inline int64_t sunDaysFromCivil(int y, unsigned m, unsigned d) {
+  y -= m <= 2;
+  const int era = (y >= 0 ? y : y - 399) / 400;
+  const unsigned yoe = (unsigned)(y - era * 400);
+  const unsigned doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
+  const unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+  return era * 146097 + (int)doe - 719468;
 }
 
-// ============================================================================
-// IMMAGINE LUNA (RLE)
-// ============================================================================
+static time_t timegm_esp32(struct tm *tm) {
+  return (time_t)(sunDaysFromCivil(tm->tm_year + 1900, tm->tm_mon + 1, tm->tm_mday) * 86400LL +
+                  tm->tm_hour * 3600 + tm->tm_min * 60 + tm->tm_sec);
+}
+
 #include "../images/luna.h"
 
 static const CosinoRLE LUNA_ART = {luna, sizeof(luna) / sizeof(RLERun)};
@@ -60,9 +47,6 @@ extern void drawBoldMain(int16_t x, int16_t y, const String &raw,
                          uint8_t scale);
 extern bool httpGET(const String &url, String &body, uint32_t timeoutMs);
 
-// ============================================================================
-// CACHE SOLE
-// ============================================================================
 static char sun_rise[6];
 static char sun_set[6];
 static char sun_noon[6];
@@ -71,18 +55,11 @@ static char sun_ce[6];
 static char sun_len[16];
 static char sun_uvi[8];
 
-// ============================================================================
-// CACHE LUNA
-// ============================================================================
-static float g_moon_illum01 = -1.0f; // 0=new, 1=full
-static bool g_moon_waxing = true;    // true = crescente
+static float g_moon_illum01 = -1.0f;
+static bool g_moon_waxing = true;
 
-// (phase_idx non usato più per label, solo per texture)
 static uint8_t g_moon_phase_idx = 0;
 
-// ============================================================================
-// TEXTURE LUNA
-// ============================================================================
 static uint16_t g_moonTex[LUNA_WIDTH * LUNA_HEIGHT];
 static bool g_moonTexReady = false;
 
@@ -90,61 +67,26 @@ static uint16_t g_shadowTex[LUNA_WIDTH * LUNA_HEIGHT];
 static bool g_shadowReady = false;
 static int g_shadowPhaseBucket = -1;
 
-// ============================================================================
-// TIMEZONE
-// ============================================================================
-static inline long calcTZ() {
-  time_t now = time(nullptr);
-  struct tm lo {
-  }, gm{};
-  localtime_r(&now, &lo);
-  gmtime_r(&now, &gm);
-
-  long d = lo.tm_hour - gm.tm_hour;
-  if (d > 12)
-    d -= 24;
-  if (d < -12)
-    d += 24;
-  return d;
-}
-
-// ============================================================================
-// ISO HELPERS
-// ============================================================================
-static inline void isoToHM(const String &iso, char out[6]) {
-  int t = iso.indexOf('T');
-  if (t < 0 || t + 5 >= iso.length()) {
-    strcpy(out, "--:--");
-    return;
-  }
-  out[0] = iso[t + 1];
-  out[1] = iso[t + 2];
-  out[2] = ':';
-  out[3] = iso[t + 4];
-  out[4] = iso[t + 5];
-  out[5] = 0;
-}
-
 static inline bool isoToEpoch(const String &s, time_t &out) {
-  if (s.length() < 19)
-    return false;
-
-  struct tm tt {};
-  tt.tm_year = s.substring(0, 4).toInt() - 1900;
-  tt.tm_mon = s.substring(5, 7).toInt() - 1;
-  tt.tm_mday = s.substring(8, 10).toInt();
-  tt.tm_hour = s.substring(11, 13).toInt();
-  tt.tm_min = s.substring(14, 16).toInt();
-  tt.tm_sec = s.substring(17, 19).toInt();
-
-  time_t local = mktime(&tt);
-  out = local - calcTZ() * 3600;
+  if (s.length() < 19) return false;
+  int y = s.substring(0, 4).toInt();
+  int mo = s.substring(5, 7).toInt();
+  int d = s.substring(8, 10).toInt();
+  int h = s.substring(11, 13).toInt();
+  int mi = s.substring(14, 16).toInt();
+  int se = s.substring(17, 19).toInt();
+  out = (time_t)(sunDaysFromCivil(y, mo, d) * 86400LL + h * 3600 + mi * 60 + se);
   return true;
 }
 
-// ============================================================================
-// TEXTURE BASE
-// ============================================================================
+static inline void isoToHM(const String &iso, char out[6]) {
+  time_t tt;
+  if (!isoToEpoch(iso, tt)) { strcpy(out, "--:--"); return; }
+  struct tm local{};
+  localtime_r(&tt, &local);
+  snprintf(out, 6, "%02d:%02d", local.tm_hour, local.tm_min);
+}
+
 static void ensureMoonTextureDecoded() {
   if (g_moonTexReady)
     return;
@@ -161,9 +103,6 @@ static void ensureMoonTextureDecoded() {
   g_moonTexReady = true;
 }
 
-// ============================================================================
-// SHADOW TEXTURE (FORMULA CORRETTA DEL TERMINATORE)
-// ============================================================================
 static void buildShadowTexture(int r) {
   if (g_shadowReady && g_shadowPhaseBucket == g_moon_phase_idx)
     return;
@@ -177,23 +116,8 @@ static void buildShadowTexture(int r) {
   if (illum > 1)
     illum = 1.0f;
 
-  // ============================================================
-  // FORMULA DEL TERMINATORE LUNARE
-  // ============================================================
-  // Il terminatore è un'ellisse. Per ogni riga y, la posizione x è:
-  //   x_terminator = k * sqrt(r² - y²)
-  // dove k = cos(π * illum):
-  //   - illum=0 (new):  k=+1  → terminatore al bordo destro → tutto buio
-  //   - illum=0.5 (quarter): k=0 → terminatore al centro → metà illuminata
-  //   - illum=1 (full): k=-1 → terminatore al bordo sinistro → tutto illuminato
-  //
-  // Waxing: lato DESTRO illuminato → lit = (x > x_terminator)
-  // Waning: lato SINISTRO illuminato → specchiamo k e usiamo lit = (x <
-  // x_terminator)
-
   float terminator_k = cosf(M_PI * illum);
 
-  // Per waning, specchiamo il terminatore
   if (!g_moon_waxing) {
     terminator_k = -terminator_k;
   }
@@ -206,10 +130,9 @@ static void buildShadowTexture(int r) {
     if (y2 > r2)
       continue;
 
-    float x_edge = sqrtf((float)(r2 - y2)); // bordo del disco a questa y
+    float x_edge = sqrtf((float)(r2 - y2));
     int xlim = (int)x_edge;
 
-    // Posizione x del terminatore a questa altezza y
     float x_terminator = terminator_k * x_edge;
 
     for (int x = -xlim; x <= xlim; x++) {
@@ -221,21 +144,21 @@ static void buildShadowTexture(int r) {
 
       bool lit;
       if (g_moon_waxing) {
-        // Waxing: illuminato a DESTRA del terminatore
+
         lit = ((float)x > x_terminator);
       } else {
-        // Waning: illuminato a SINISTRA del terminatore
+
         lit = ((float)x < x_terminator);
       }
 
       if (!lit) {
-        // Zona in ombra: oscura
+
         uint8_t R = ((base >> 11) & 0x1F) >> 2;
         uint8_t G = ((base >> 5) & 0x3F) >> 2;
         uint8_t B = (base & 0x1F) >> 2;
         g_shadowTex[row + px] = (R << 11) | (G << 5) | B;
       } else {
-        // Zona illuminata
+
         g_shadowTex[row + px] = base;
       }
     }
@@ -244,12 +167,9 @@ static void buildShadowTexture(int r) {
   g_shadowReady = true;
 }
 
-// ============================================================================
-// ICS PARSER
-// ============================================================================
 struct MoonEvent {
   time_t ts;
-  uint8_t phase4; // 0=new,1=first,2=full,3=last
+  uint8_t phase4;
   bool valid;
 };
 
@@ -286,9 +206,6 @@ static time_t parseDate(const String &line) {
   return timegm_esp32(&tt);
 }
 
-// ============================================================================
-// Interpolazione illuminazione
-// ============================================================================
 static void interpolatePhase(const MoonEvent &prev, const MoonEvent &next,
                              time_t nowUTC) {
   if (!prev.valid || !next.valid) {
@@ -312,7 +229,6 @@ static void interpolatePhase(const MoonEvent &prev, const MoonEvent &next,
   if (pos > 1)
     pos = 1;
 
-  // da 4 fasi → 8 indici per texture (NON label)
   uint8_t p0 = prev.phase4 * 2;
   uint8_t p1 = next.phase4 * 2;
   if (p1 <= p0)
@@ -321,46 +237,44 @@ static void interpolatePhase(const MoonEvent &prev, const MoonEvent &next,
   float pf = p0 + pos * (p1 - p0);
   g_moon_phase_idx = ((uint8_t)roundf(pf)) % 8;
 
-  // Determina se siamo in fase crescente o calante
-  // 0=new, 1=first quarter, 2=full, 3=last quarter
   if (prev.phase4 == 0 && next.phase4 == 1) {
-    // new → first quarter: CRESCENTE
+
     g_moon_waxing = true;
-    g_moon_illum01 = pos * 0.5f; // da 0 a 0.5
+    g_moon_illum01 = pos * 0.5f;
   } else if (prev.phase4 == 1 && next.phase4 == 2) {
-    // first quarter → full: CRESCENTE
+
     g_moon_waxing = true;
-    g_moon_illum01 = 0.5f + (pos * 0.5f); // da 0.5 a 1.0
+    g_moon_illum01 = 0.5f + (pos * 0.5f);
   } else if (prev.phase4 == 2 && next.phase4 == 3) {
-    // full → last quarter: CALANTE
+
     g_moon_waxing = false;
-    g_moon_illum01 = 1.0f - (pos * 0.5f); // da 1.0 a 0.5
+    g_moon_illum01 = 1.0f - (pos * 0.5f);
   } else if (prev.phase4 == 3 && next.phase4 == 0) {
-    // last quarter → new: CALANTE
+
     g_moon_waxing = false;
-    g_moon_illum01 = 0.5f - (pos * 0.5f); // da 0.5 a 0
+    g_moon_illum01 = 0.5f - (pos * 0.5f);
   } else if (prev.phase4 == 3 && next.phase4 == 1) {
-    // last quarter → first (crossing new moon): CRESCENTE dopo new
+
     g_moon_waxing = (pos > 0.5f);
     if (pos < 0.5f) {
-      // calante verso new
-      g_moon_illum01 = 0.5f - (pos * 1.0f); // da 0.5 a 0
+
+      g_moon_illum01 = 0.5f - (pos * 1.0f);
     } else {
-      // crescente da new
-      g_moon_illum01 = (pos - 0.5f) * 1.0f; // da 0 a 0.5
+
+      g_moon_illum01 = (pos - 0.5f) * 1.0f;
     }
   } else if (prev.phase4 == 1 && next.phase4 == 3) {
-    // first quarter → last (crossing full moon): prima CRESCENTE poi CALANTE
+
     g_moon_waxing = (pos < 0.5f);
     if (pos < 0.5f) {
-      // crescente verso full
-      g_moon_illum01 = 0.5f + (pos * 1.0f); // da 0.5 a 1.0
+
+      g_moon_illum01 = 0.5f + (pos * 1.0f);
     } else {
-      // calante da full
-      g_moon_illum01 = 1.0f - ((pos - 0.5f) * 1.0f); // da 1.0 a 0.5
+
+      g_moon_illum01 = 1.0f - ((pos - 0.5f) * 1.0f);
     }
   } else {
-    // Fallback generico (non dovrebbe accadere con dati corretti)
+
     float illumPrev = (prev.phase4 == 0 ? 0 : prev.phase4 == 2 ? 1 : 0.5);
     float illumNext = (next.phase4 == 0 ? 0 : next.phase4 == 2 ? 1 : 0.5);
     g_moon_illum01 = illumPrev + pos * (illumNext - illumPrev);
@@ -368,9 +282,6 @@ static void interpolatePhase(const MoonEvent &prev, const MoonEvent &next,
   }
 }
 
-// ============================================================================
-// FETCH SUN + MOON
-// ============================================================================
 bool fetchSun() {
 
   strcpy(sun_rise, "--:--");
@@ -385,7 +296,6 @@ bool fetchSun() {
   g_moon_phase_idx = 0;
   g_moon_waxing = true;
 
-  // 1) Geocoding
   float lat, lon;
   if (!fetchLatLon(lat, lon))
     return false;
@@ -393,7 +303,6 @@ bool fetchSun() {
   g_lat = String(lat, 6);
   g_lon = String(lon, 6);
 
-  // 2) SUN
   {
     String body;
     String url = "https://api.sunrise-sunset.org/json?lat=" + g_lat +
@@ -426,7 +335,6 @@ bool fetchSun() {
     }
   }
 
-  // 3) UV
   {
     String bodyUV;
     String urlUV = String("https://api.open-meteo.com/v1/forecast") +
@@ -440,7 +348,6 @@ bool fetchSun() {
     }
   }
 
-  // 4) MOON (ICS)
   {
     String bodyICS;
 
@@ -456,7 +363,7 @@ bool fetchSun() {
       MoonEvent prev{0, 0, false};
       MoonEvent next{0, 0, false};
 
-      time_t nowUTC = time(nullptr) - calcTZ() * 3600;
+      time_t nowUTC = time(nullptr);
 
       int pos = 0;
       while (true) {
@@ -520,9 +427,6 @@ bool fetchSun() {
   return true;
 }
 
-// ============================================================================
-// UI helpers
-// ============================================================================
 static inline void sunRow(const char *label, const char *val, int &y) {
   const int SZ = TEXT_SCALE + 1;
   const int H = BASE_CHAR_H * SZ + 8;
@@ -543,9 +447,6 @@ static inline void sunRow(const char *label, const char *val, int &y) {
   y += H;
 }
 
-// ============================================================================
-// LABEL LUNA (basata su illuminazione vera + waxing)
-// ============================================================================
 static void buildMoonPhaseLabel(bool it, char out[32]) {
 
   if (g_moon_illum01 < 0) {
@@ -557,13 +458,6 @@ static void buildMoonPhaseLabel(bool it, char out[32]) {
   bool w = g_moon_waxing;
 
   const char *en, *itn;
-
-  // Soglie corrette per le 8 fasi lunari:
-  // 0-3%:     New Moon
-  // 3-47%:    Crescent (falce)
-  // 47-53%:   Quarter (primo/ultimo quarto)
-  // 53-97%:   Gibbous (gibbosa)
-  // 97-100%:  Full Moon
 
   if (illum < 0.03f) {
     en = "New Moon";
@@ -585,9 +479,6 @@ static void buildMoonPhaseLabel(bool it, char out[32]) {
   strcpy(out, it ? itn : en);
 }
 
-// ============================================================================
-// DRAW LUNA
-// ============================================================================
 static void drawMoonPhaseGraphic(int16_t cx, int16_t cy, int16_t r) {
   if (g_moon_illum01 < 0)
     return;
@@ -613,9 +504,6 @@ static void drawMoonPhaseGraphic(int16_t cx, int16_t cy, int16_t r) {
   gfx->drawCircle(cx, cy, r, 0x0000);
 }
 
-// ============================================================================
-// PAGINA SUN
-// ============================================================================
 void pageSun() {
   const bool it = (g_lang == "it");
 

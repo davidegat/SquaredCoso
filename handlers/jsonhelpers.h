@@ -1,72 +1,3 @@
-/*
-===============================================================================
-   SQUARED — JSON HELPERS (Header-only)
-   Parser JSON ultra-leggero per ESP32-S3 basato su String Arduino.
-   Nessuna allocazione dinamica, nessuna dipendenza esterna, funzioni pensate
-   per risposte compatte dalle API (Open-Meteo, ZenQuotes, Home Assistant, BTC,
-   FX, RSS, ICS, ecc.).
-   Repository: https://github.com/davidegat/SquaredCoso
-   Licenza: CC BY-NC 4.0
-===============================================================================
-
-   ------------------------------------------------------------
-   ELENCO FUNZIONI E UTILIZZO
-   ------------------------------------------------------------
-
-   • extractJsonNumber(body, key, out [,from])
-       Cerca "key" nel JSON e legge il numero subito dopo il ':'.
-       Utile per JSON molto semplici o cerchi generici.
-
-   • extractJsonString2(body, key, out)
-       Estrae la stringa associata a "key": "value" con parsing lineare.
-       Funziona anche con leggeri formati non standard.
-
-   • jsonNum(src, "key", out [,from])
-       Metodo principale raccomandato per leggere "key": NUMBER.
-       Robusto, veloce, usa ricerca con "key" racchiusa tra doppi apici.
-
-   • jsonKV(src, "key", out)
-       Estrazione sicura di "key": "value".
-       Usato ovunque serva solo testo (RSS, QOD, Home Assistant, ecc.).
-
-   • jsonArrFirstNumber(src, "key", out)
-       Raccoglie il primo numero dopo "key":[…].
-       Fondamentale per API tipo Open-Meteo o forecast a grana fine.
-
-   • extractObjectBlock(body, "key", out)
-       Trova "key":{ ... } e restituisce l’intero oggetto annidato.
-       Usato per analisi più strutturate senza JSON parser pesanti.
-
-   • jsonDailyFirstNumber(src, "key", out)
-       Variante per Open-Meteo: gestisce array giornalieri più complessi
-       (temperature, UV, AQI, precipitazioni).
-
-   • findMatchingBracket(src, pos)
-       Trova la ']' corrispondente alla '[' iniziale.
-       Essenziale per array lunghi o contenenti più blocchi
-       (anch’essa usata nella pagina Temperature 24h).
-
-   ------------------------------------------------------------
-   NOTE IMPORTANTI
-   ------------------------------------------------------------
-
-   • Le funzioni NON sono un parser JSON formale, ma una soluzione ultra-veloce
-     adatta a dispositivi embedded (ESP32-S3 con display RGB DMA).
-
-   • Tutti i parser assumono JSON ben formati e non protetti contro contenuti
-     volutamente corrotti (perfettamente adeguato per API standard).
-
-   • Usare SEMPRE:
-       - jsonNum()      per numeri
-       - jsonKV()       per stringhe
-       - jsonArrFirstNumber() per il primo valore in array
-       - jsonDailyFirstNumber() per dati giornalieri Open-Meteo
-
-   • Tutto è header-only: nessun .cpp, nessun overhead, inline ovunque.
-
-===============================================================================
-*/
-
 #pragma once
 
 #include <Arduino.h>
@@ -100,9 +31,6 @@ static inline bool extractJsonNumber(const String &body, const String &key,
   return true;
 }
 
-// ============================================================
-// 2) PRIMITIVE – estrazione stringa "key": "value"
-// ============================================================
 static inline bool extractJsonString2(const String &body, const String &key,
                                       String &out) {
   int p = body.indexOf(key);
@@ -127,9 +55,6 @@ static inline bool extractJsonString2(const String &body, const String &key,
   return out.length() > 0;
 }
 
-// ============================================================
-// 3) jsonNum – "key": NUMBER
-// ============================================================
 static inline bool jsonNum(const String &src, const char *key, float &out,
                            int from = 0) {
   String k;
@@ -165,9 +90,6 @@ static inline bool jsonNum(const String &src, const char *key, float &out,
   return true;
 }
 
-// ============================================================
-// 4) jsonKV – "key": "value"
-// ============================================================
 static inline bool jsonKV(const String &src, const char *key, String &out) {
   String k;
   k.reserve(strlen(key) + 2);
@@ -191,9 +113,6 @@ static inline bool jsonKV(const String &src, const char *key, String &out) {
   return true;
 }
 
-// ============================================================
-// 5) jsonArrFirstNumber – "key":[ NUMBER, ... ]
-// ============================================================
 static inline bool jsonArrFirstNumber(const String &src, const char *key,
                                       float &out) {
   String k;
@@ -230,9 +149,6 @@ static inline bool jsonArrFirstNumber(const String &src, const char *key,
   return true;
 }
 
-// ============================================================
-// 6) extractObjectBlock – trova oggetto { ... } dopo una chiave
-// ============================================================
 static inline bool extractObjectBlock(const String &body, const char *key,
                                       String &out) {
   const String k = String('\"') + key + '\"';
@@ -263,9 +179,6 @@ static inline bool extractObjectBlock(const String &body, const char *key,
   return false;
 }
 
-// ============================================================
-// 7) jsonDailyFirstNumber – variante per Open-Meteo
-// ============================================================
 static inline bool jsonDailyFirstNumber(const String &src, const char *key,
                                         float &out) {
   String k;
@@ -310,9 +223,6 @@ static inline bool jsonDailyFirstNumber(const String &src, const char *key,
   return true;
 }
 
-// ============================================================
-// 8) findMatchingBracket – chiusura di '['
-// ============================================================
 static inline int findMatchingBracket(const String &src, int start) {
   const int N = src.length();
   if (start < 0 || start >= N || src[start] != '[')
@@ -333,4 +243,59 @@ static inline int findMatchingBracket(const String &src, int start) {
   }
 
   return -1;
+}
+
+static inline bool jsonStringAfterKey(const String &src, const char *key,
+                                      String &out, int from = 0) {
+  String k = String('"') + key + '"';
+  int p = src.indexOf(k, from);
+  if (p < 0) return false;
+  p = src.indexOf(':', p + k.length());
+  if (p < 0) return false;
+  int q = p + 1;
+  while (q < src.length() && isspace((unsigned char)src[q])) q++;
+  if (q >= src.length() || src[q] != '"') return false;
+  q++;
+
+  out = "";
+  out.reserve(128);
+  bool esc = false;
+  for (int i = q; i < src.length(); i++) {
+    char c = src[i];
+    if (esc) {
+      switch (c) {
+        case 'n': out += '\n'; break;
+        case 'r': out += '\r'; break;
+        case 't': out += '\t'; break;
+        case 'b': out += '\b'; break;
+        case 'f': out += '\f'; break;
+        case '"': out += '"'; break;
+        case '\\': out += '\\'; break;
+        case '/': out += '/'; break;
+        case 'u': {
+          if (i + 4 >= src.length()) return false;
+          char hex[5] = {src[i+1], src[i+2], src[i+3], src[i+4], 0};
+          long cp = strtol(hex, nullptr, 16);
+          if (cp < 0x80) out += (char)cp;
+          else if (cp < 0x800) {
+            out += (char)(0xC0 | (cp >> 6));
+            out += (char)(0x80 | (cp & 0x3F));
+          } else {
+            out += (char)(0xE0 | (cp >> 12));
+            out += (char)(0x80 | ((cp >> 6) & 0x3F));
+            out += (char)(0x80 | (cp & 0x3F));
+          }
+          i += 4;
+          break;
+        }
+        default: out += c; break;
+      }
+      esc = false;
+      continue;
+    }
+    if (c == '\\') { esc = true; continue; }
+    if (c == '"') return true;
+    out += c;
+  }
+  return false;
 }

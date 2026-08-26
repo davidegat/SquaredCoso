@@ -1,15 +1,3 @@
-/*
-===============================================================================
-   SQUARED — PAGINA "METEO" (Open-Meteo)
-   Descrizione: Geocoding Open-Meteo, condizioni attuali, forecast 3 giorni,
-                descrizioni localizzate, icone RLE, particelle dinamiche,
-                rendering compatto e ottimizzato per ESP32-S3.
-   Autore: Davide “gat” Nasato
-   Repository: https://github.com/davidegat/SquaredCoso
-   Licenza: CC BY-NC 4.0
-===============================================================================
-*/
-
 #pragma once
 
 #include "../handlers/globals.h"
@@ -34,6 +22,9 @@ extern String sanitizeText(const String &in);
 
 extern String g_city;
 extern String g_lang;
+extern String g_lat;
+extern String g_lon;
+extern bool geocodeIfNeeded();
 
 extern void drawRLE(int x, int y, int w, int h, const RLERun *data,
                     size_t runs);
@@ -42,44 +33,20 @@ extern void drawRLE(int x, int y, int w, int h, const RLERun *data,
 #include "../images/pioggia.h"
 #include "../images/sole.h"
 
-// ====================================================
-// METEO STATE
-// ====================================================
 static float w_now_tempC = NAN;
 static String w_now_desc;
 static String w_desc[3];
 
-// ----------------------------------------------------
-// Geocoding → lat/lon (Open-Meteo geocoding API)
-// ----------------------------------------------------
 static bool fetchLatLon(float &lat, float &lon) {
-  String city = g_city;
-  city.trim();
-  city.replace(" ", "%20");
-
-  String url = "https://geocoding-api.open-meteo.com/v1/search?name=" + city +
-               "&count=1&language=en&format=json";
-
-  String body;
-  if (!httpGET(url, body, 8000))
-    return false;
-
-  if (!extractJsonNumber(body, "\"latitude\"", lat))
-    return false;
-
-  if (!extractJsonNumber(body, "\"longitude\"", lon))
-    return false;
-
-  return true;
+  if (!geocodeIfNeeded()) return false;
+  lat = g_lat.toFloat();
+  lon = g_lon.toFloat();
+  return !isnan(lat) && !isnan(lon);
 }
 
-// ----------------------------------------------------
-// Mapping weathercode → descrizione (IT/EN)
-// ----------------------------------------------------
 static String mapWeatherCodeToDesc(int code, const String &lang) {
   String d = "Cloudy";
 
-  // mappa basata sulla documentazione Open-Meteo
   if (code == 0) {
     d = "Clear sky";
   } else if (code == 1 || code == 2 || code == 3) {
@@ -122,9 +89,6 @@ static String mapWeatherCodeToDesc(int code, const String &lang) {
   return d;
 }
 
-// ----------------------------------------------------
-// Estrai l'ennesimo weathercode dall'array daily.weathercode
-// ----------------------------------------------------
 static bool extractDailyWeathercode(const String &body, int index,
                                     int &codeOut) {
   int dailyPos = body.indexOf("\"daily\"");
@@ -144,7 +108,7 @@ static bool extractDailyWeathercode(const String &body, int index,
   int currentIndex = 0;
 
   while (p < len) {
-    // salta spazi, virgole, newline
+
     while (p < len && (body[p] == ' ' || body[p] == ',' || body[p] == '\n' ||
                        body[p] == '\r' || body[p] == '\t'))
       p++;
@@ -167,11 +131,8 @@ static bool extractDailyWeathercode(const String &body, int index,
   return false;
 }
 
-// ----------------------------------------------------
-// Fetch meteo da Open-Meteo
-// ----------------------------------------------------
 bool fetchWeather() {
-  // reset stato, per evitare residui vecchi se il fetch fallisce
+
   w_now_tempC = NAN;
   w_now_desc = "";
   for (int i = 0; i < 3; i++) {
@@ -195,20 +156,15 @@ bool fetchWeather() {
 
   bool ok = false;
 
-  // ------------------------------------------------
-  // current_weather block
-  // ------------------------------------------------
   int cwPos = body.indexOf("\"current_weather\"");
   if (cwPos >= 0) {
 
-    // Temperatura attuale (°C)
     float t;
     if (extractJsonNumber(body, "\"temperature\"", t, cwPos)) {
       w_now_tempC = t;
       ok = true;
     }
 
-    // weathercode → descrizione
     float codef;
     if (extractJsonNumber(body, "\"weathercode\"", codef, cwPos)) {
       int code = (int)codef;
@@ -219,9 +175,6 @@ bool fetchWeather() {
     }
   }
 
-  // ------------------------------------------------
-  // Forecast 3 giorni da daily.weathercode[]
-  // ------------------------------------------------
   for (int i = 0; i < 3; i++) {
     int code;
     if (!extractDailyWeathercode(body, i, code))
@@ -236,9 +189,6 @@ bool fetchWeather() {
   return ok;
 }
 
-// ======================================================
-// ICONA DA DESCRIZIONE
-// ======================================================
 static inline int pickWeatherIcon(const String &d) {
   String s = d;
   s.toLowerCase();
@@ -249,9 +199,6 @@ static inline int pickWeatherIcon(const String &d) {
   return 1;
 }
 
-// ---------------------------------------------------------------------------
-// Particelle di polvere che rimbalzano su UI, bordi e linee orizzontali
-// ---------------------------------------------------------------------------
 #define N_DUST 80
 
 struct Particle {
@@ -266,9 +213,6 @@ static bool dustInit = false;
 static uint32_t dustLast = 0;
 
 constexpr uint16_t dustCol[3] = {0x7BEF, 0xAD75, 0xFFFF};
-
-// zone protette dalla UI: header, testo, linee, temp, icona
-// fa schifo ma per ora funziona
 
 static inline bool isUI(int x, int y) {
   if (y < PAGE_Y + 58)
@@ -301,7 +245,6 @@ static inline bool isUI(int x, int y) {
   return false;
 }
 
-// posizionamento iniziale particella in zona non-UI con velocità compatibile
 static inline void initDust(int i) {
   Particle &p = dust[i];
 
@@ -335,7 +278,6 @@ static inline void initDust(int i) {
   } while (p.vx == 0 && p.vy == 0);
 }
 
-// tick animazione particelle, con rimbalzo su bordi e linee UI
 void pageWeatherParticlesTick() {
   uint32_t now = millis();
   if (now - dustLast < 40)
@@ -397,9 +339,6 @@ void pageWeatherParticlesTick() {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Rendering pagina METEO: particelle + testi + icona + temp grande
-// ---------------------------------------------------------------------------
 void pageWeather() {
   pageWeatherParticlesTick();
 
@@ -408,7 +347,6 @@ void pageWeather() {
 
   int y = PAGE_Y;
 
-  // linea principale: preferisci sempre mostrare qualcosa
   String line;
   if (!isnan(w_now_tempC) && w_now_desc.length()) {
     line = String((int)round(w_now_tempC)) + "c  " + w_now_desc;
@@ -462,7 +400,6 @@ void pageWeather() {
     break;
   }
 
-  // temperatura grande in basso a sinistra
   if (!isnan(w_now_tempC)) {
     gfx->setTextColor(COL_ACCENT1, COL_BG);
     gfx->setTextSize(9);

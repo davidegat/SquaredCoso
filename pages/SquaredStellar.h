@@ -1,17 +1,3 @@
-/*
-===============================================================================
-   SQUARED — PAGINA "STELLAR" (Terra–Sole + Stagioni)
-   Descrizione: Visualizzazione orbitale Terra–Sole con:
-                - orbita annuale e posizione attuale della Terra
-                - solstizi ed equinozi marcati
-                - simulazione luce/ombra sulla Terra
-                - stelle pulsanti di sfondo e label auto-disposte
-   Autore: Davide “gat” Nasato
-   Repository: https://github.com/davidegat/SquaredCoso
-   Licenza: CC BY-NC 4.0
-===============================================================================
-*/
-
 #pragma once
 
 #include "../handlers/globals.h"
@@ -26,22 +12,15 @@ extern const int PAGE_X, PAGE_Y, PAGE_W, PAGE_H, TEXT_SCALE;
 extern String g_lang;
 extern void drawHeader(const String &);
 
-// ---------------------------------------------------------------------------
-// Costanti colore
-// ---------------------------------------------------------------------------
 static const uint16_t BG = 0x0000;
 static const uint16_t SUN = 0xFFE0;
 static const uint16_t EAR_BLUE = 0x1B70;
 static const uint16_t EAR_GREEN = 0x07E0;
 static const uint16_t STAR_COL[3] = {0x8410, 0xC618, 0xFFFF};
 
-// Sfumatura sole
 static const uint16_t SUN_GLOW[] PROGMEM = {0x4200, 0x6320, 0x8440, 0xC5A0,
                                             0xE6C0};
 
-// ---------------------------------------------------------------------------
-// Stelle
-// ---------------------------------------------------------------------------
 static uint32_t nextPulse = 0;
 static const uint8_t NS = 80;
 static int16_t sx[NS], sy[NS];
@@ -67,7 +46,7 @@ static void drawStars() {
 
 void tickStellar() {
   const uint32_t t = millis();
-  if (t < nextPulse)
+  if ((int32_t)(t - nextPulse) < 0)
     return;
   nextPulse = t + 1000;
 
@@ -77,15 +56,11 @@ void tickStellar() {
   drawStars();
 }
 
-// ---------------------------------------------------------------------------
-// Utility collisioni label
-// ---------------------------------------------------------------------------
 static inline bool rectOverlap(int16_t x1, int16_t y1, int16_t w1, int16_t h1,
                                int16_t x2, int16_t y2, int16_t w2, int16_t h2) {
   return !((x1 + w1 < x2) | (x2 + w2 < x1) | (y1 + h1 < y2) | (y2 + h2 < y1));
 }
 
-// Usa distanza al quadrato per evitare sqrtf
 static void avoidCircle(int16_t &lx, int16_t &ly, int16_t lw, int16_t lh,
                         float cx, float cy, float crSq, float margin) {
   const float lcx = lx + lw * 0.5f;
@@ -147,7 +122,6 @@ static void pushApart(int16_t &ax, int16_t &ay, int16_t aw, int16_t ah,
   by -= (int16_t)(dy * k);
 }
 
-// Struct per label
 struct Label {
   int16_t x, y, w, h;
 };
@@ -159,23 +133,20 @@ static void resolveLabelConstraints(Label *labels, uint8_t count, float ex,
   const float EARTH_MARGIN = 8.0f;
   const float SUN_MARGIN = 12.0f;
 
-  // 15 iterazioni
   for (uint8_t iter = 0; iter < 15; iter++) {
-    // Evita Terra (skip label 0 = Terra)
+
     for (uint8_t i = 1; i < count; i++) {
-      if (i != 1) // skip label Sole per Terra
+      if (i != 1)
         avoidCircle(labels[i].x, labels[i].y, labels[i].w, labels[i].h, ex, ey,
                     erSq, EARTH_MARGIN);
     }
 
-    // Evita Sole (skip label 1 = Sole)
     for (uint8_t i = 0; i < count; i++) {
       if (i != 1)
         avoidCircle(labels[i].x, labels[i].y, labels[i].w, labels[i].h, sx_c,
                     sy_c, sunRSq, SUN_MARGIN);
     }
 
-    // Collisioni tra label
     for (uint8_t i = 0; i < count; i++) {
       for (uint8_t j = i + 1; j < count; j++) {
         pushApart(labels[i].x, labels[i].y, labels[i].w, labels[i].h,
@@ -183,7 +154,6 @@ static void resolveLabelConstraints(Label *labels, uint8_t count, float ex,
       }
     }
 
-    // Clamp
     for (uint8_t i = 0; i < count; i++) {
       clampToScreen(labels[i].x, labels[i].y, labels[i].w, labels[i].h, screenW,
                     screenH, minY);
@@ -191,9 +161,6 @@ static void resolveLabelConstraints(Label *labels, uint8_t count, float ex,
   }
 }
 
-// ---------------------------------------------------------------------------
-// Sfumatura Sole
-// ---------------------------------------------------------------------------
 static void drawSunGlow(int16_t cx, int16_t cy, int16_t sunR) {
   for (int8_t level = 0; level < 5; level++) {
     const uint16_t col = pgm_read_word(&SUN_GLOW[level]);
@@ -205,9 +172,6 @@ static void drawSunGlow(int16_t cx, int16_t cy, int16_t sunR) {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Terra
-// ---------------------------------------------------------------------------
 static void drawEarth(float ex, float ey, int16_t er, float lx, float ly) {
   const int16_t erSq = er * er;
 
@@ -223,7 +187,7 @@ static void drawEarth(float ex, float ey, int16_t er, float lx, float ly) {
 
       uint16_t c;
       if (dot > -0.2f) {
-        // Lato illuminato
+
         if (dot > 0.2f && (random(100) < 15)) {
           c = EAR_GREEN;
         } else {
@@ -232,7 +196,7 @@ static void drawEarth(float ex, float ey, int16_t er, float lx, float ly) {
             c |= 0x4208;
         }
       } else {
-        // Lato in ombra
+
         c = EAR_BLUE & 0x7BEF;
       }
 
@@ -241,9 +205,6 @@ static void drawEarth(float ex, float ey, int16_t er, float lx, float ly) {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Funzioni helper
-// ---------------------------------------------------------------------------
 static inline float normAng(float a) {
   while (a < 0)
     a += TWO_PI;
@@ -259,6 +220,52 @@ static void orbitPos(int16_t cx, int16_t cy, float r, float f, float ps,
   const float ang = p * TWO_PI;
   x = cx + (int16_t)(r * cosf(ang));
   y = cy + (int16_t)(r * sinf(ang));
+}
+
+static double stellarJulianDay(int year, int month, int day) {
+  if (month <= 2) {
+    year--;
+    month += 12;
+  }
+  const int a = year / 100;
+  const int b = 2 - a + a / 4;
+  return floor(365.25 * (year + 4716)) + floor(30.6001 * (month + 1)) +
+         day + b - 1524.5;
+}
+
+// Meeus polynomial approximation for equinox/solstice JDE, valid for 2000-3000.
+static float stellarSeasonDay(int year, uint8_t season) {
+  if (year < 2000 || year > 3000) {
+    static const float fallback[4] = {78.5f, 171.5f, 265.0f, 354.9f};
+    return fallback[season & 3];
+  }
+
+  const double Y = (year - 2000) / 1000.0;
+  const double Y2 = Y * Y;
+  const double Y3 = Y2 * Y;
+  const double Y4 = Y3 * Y;
+  double jde;
+
+  switch (season & 3) {
+    case 0:
+      jde = 2451623.80984 + 365242.37404 * Y + 0.05169 * Y2 -
+            0.00411 * Y3 - 0.00057 * Y4;
+      break;
+    case 1:
+      jde = 2451716.56767 + 365241.62603 * Y + 0.00325 * Y2 +
+            0.00888 * Y3 - 0.00030 * Y4;
+      break;
+    case 2:
+      jde = 2451810.21715 + 365242.01767 * Y - 0.11575 * Y2 +
+            0.00337 * Y3 + 0.00078 * Y4;
+      break;
+    default:
+      jde = 2451900.05952 + 365242.74049 * Y - 0.06223 * Y2 -
+            0.00823 * Y3 + 0.00032 * Y4;
+      break;
+  }
+
+  return (float)(jde - stellarJulianDay(year, 1, 1));
 }
 
 static void drawTick(int16_t px, int16_t py, int16_t cx, int16_t cy,
@@ -282,9 +289,6 @@ static void radialLabelPos(int16_t px, int16_t py, int16_t cx, int16_t cy,
   ly = py + (int16_t)(dy * invLen * 16) - (lh >> 1);
 }
 
-// ===========================================================================
-// PAGE
-// ===========================================================================
 void pageStellar() {
   const bool isItalian = (g_lang == "it");
   drawHeader(isItalian ? F("Sistema Solare") : F("Solar system"));
@@ -300,7 +304,6 @@ void pageStellar() {
   const int16_t cx = w >> 1;
   const int16_t cy = PAGE_Y + ((h - PAGE_Y) >> 1) + 10;
 
-  // Orbita
   const float r = ((w < (h - PAGE_Y)) ? w : (h - PAGE_Y)) * 0.40f;
 
   for (int16_t d = 0; d < 360; d++) {
@@ -309,15 +312,26 @@ void pageStellar() {
                    COL_DIVIDER);
   }
 
-  // Costanti stagionali
-  static const float D_SPRING = 79.0f, D_SUMMER = 172.0f, D_AUTUMN = 266.0f,
-                     D_WINTER = 355.0f;
-  static const float ps = -3.0f / 365.25f;
+  time_t now;
+  time(&now);
+  struct tm lt;
+  localtime_r(&now, &lt);
 
-  const float F1 = D_SPRING / 365.25f;
-  const float F2 = D_SUMMER / 365.25f;
-  const float F3 = D_AUTUMN / 365.25f;
-  const float F4 = D_WINTER / 365.25f;
+  const int year = lt.tm_year + 1900;
+  const bool leap = ((year % 4 == 0) && (year % 100 != 0)) || (year % 400 == 0);
+  const int16_t daysInYear = leap ? 366 : 365;
+
+  const float D_SPRING = stellarSeasonDay(year, 0);
+  const float D_SUMMER = stellarSeasonDay(year, 1);
+  const float D_AUTUMN = stellarSeasonDay(year, 2);
+  const float D_WINTER = stellarSeasonDay(year, 3);
+
+  const float ps = -3.0f / (float)daysInYear;
+
+  const float F1 = D_SPRING / (float)daysInYear;
+  const float F2 = D_SUMMER / (float)daysInYear;
+  const float F3 = D_AUTUMN / (float)daysInYear;
+  const float F4 = D_WINTER / (float)daysInYear;
 
   int16_t xS1, yS1, xS2, yS2, xS3, yS3, xS4, yS4;
   orbitPos(cx, cy, r, F1, ps, xS1, yS1);
@@ -330,7 +344,6 @@ void pageStellar() {
   drawTick(xS3, yS3, cx, cy, 6);
   drawTick(xS4, yS4, cx, cy, 6);
 
-  // Sole
   const int16_t scx = cx, scy = cy;
   const int16_t sunR = 26;
 
@@ -338,27 +351,43 @@ void pageStellar() {
   gfx->fillCircle(scx, scy, sunR, SUN);
   gfx->drawCircle(scx, scy, sunR + 1, COL_DIVIDER);
 
-  // Angoli stagioni
-  const float angSPR = normAng(atan2f((float)(yS4 - cy), (float)(xS4 - cx)));
-  const float angSUM = normAng(atan2f((float)(yS1 - cy), (float)(xS1 - cx)));
-  const float angAUT = normAng(atan2f((float)(yS2 - cy), (float)(xS2 - cx)));
-  const float angWIN = normAng(atan2f((float)(yS3 - cy), (float)(xS3 - cx)));
+  const float nowDay =
+      (float)lt.tm_yday +
+      (lt.tm_hour * 3600.0f + lt.tm_min * 60.0f + lt.tm_sec) / 86400.0f;
+  float nextSeasonDay;
+  if (nowDay < D_SPRING)
+    nextSeasonDay = D_SPRING;
+  else if (nowDay < D_SUMMER)
+    nextSeasonDay = D_SUMMER;
+  else if (nowDay < D_AUTUMN)
+    nextSeasonDay = D_AUTUMN;
+  else if (nowDay < D_WINTER)
+    nextSeasonDay = D_WINTER;
+  else
+    nextSeasonDay = daysInYear + stellarSeasonDay(year + 1, 0);
 
-  // Giorno anno
-  time_t now;
-  time(&now);
-  struct tm lt;
-  localtime_r(&now, &lt);
+  int16_t daysToSeason = (int16_t)ceilf(nextSeasonDay - nowDay);
+  if (daysToSeason < 0)
+    daysToSeason = 0;
 
-  const int year = lt.tm_year + 1900;
-  const bool leap = ((year % 4 == 0) && (year % 100 != 0)) || (year % 400 == 0);
-  const int16_t daysInYear = leap ? 366 : 365;
-  const float day = (float)lt.tm_yday;
+  char seasonCountdown[8];
+  snprintf(seasonCountdown, sizeof(seasonCountdown), "-%d", daysToSeason);
+  gfx->setTextSize(2);
+  gfx->setTextColor(COL_TEXT, BG);
+  const int16_t countdownW = strlen(seasonCountdown) * 12;
+  gfx->setCursor(scx - (countdownW >> 1), scy - sunR - 22);
+  gfx->print(seasonCountdown);
 
-  // Interpolazione angolo Terra
+  const float angSPR = normAng(atan2f((float)(yS1 - cy), (float)(xS1 - cx)));
+  const float angSUM = normAng(atan2f((float)(yS2 - cy), (float)(xS2 - cx)));
+  const float angAUT = normAng(atan2f((float)(yS3 - cy), (float)(xS3 - cx)));
+  const float angWIN = normAng(atan2f((float)(yS4 - cy), (float)(xS4 - cx)));
+
+  const float day = nowDay;
+
   const float kd[5] = {D_WINTER - daysInYear, D_SPRING, D_SUMMER, D_AUTUMN,
                        D_WINTER};
-  const float ka[5] = {angWIN - TWO_PI, angSPR, angSUM, angAUT, angWIN};
+  const float ka[5] = {angWIN - (float)TWO_PI, angSPR, angSUM, angAUT, angWIN};
 
   float angEarth = angWIN;
   for (uint8_t i = 0; i < 4; i++) {
@@ -370,7 +399,6 @@ void pageStellar() {
   }
   angEarth = normAng(angEarth);
 
-  // Terra
   const float ex = cx + r * cosf(angEarth);
   const float ey = cy + r * sinf(angEarth);
   const int16_t er = 15;
@@ -382,22 +410,18 @@ void pageStellar() {
 
   drawEarth(ex, ey, er, lx, ly);
 
-  // Label
   gfx->setTextSize(1);
   gfx->setTextColor(COL_TEXT, BG);
 
-  // Stringhe (stack locale per efficienza)
   const char *const terra = isItalian ? "Terra" : "Earth";
   const char *const sole = isItalian ? "Sole" : "Sun";
-  const char *const S1s = isItalian ? "Sol. Estate" : "Summer Sol.";
-  const char *const S2s = isItalian ? "Eq. Autunno" : "Autumn Eq.";
-  const char *const S3s = isItalian ? "Sol. Inverno" : "Winter Sol.";
-  const char *const S4s = isItalian ? "Eq. Primavera" : "Spring Eq.";
+  const char *const S1s = isItalian ? "Eq. Primavera" : "Spring Eq.";
+  const char *const S2s = isItalian ? "Sol. Estate" : "Summer Sol.";
+  const char *const S3s = isItalian ? "Eq. Autunno" : "Autumn Eq.";
+  const char *const S4s = isItalian ? "Sol. Inverno" : "Winter Sol.";
 
-  // Array di label
   Label labels[6];
 
-  // Terra (radiale verso esterno)
   const float earthOutInv =
       1.0f /
       (sqrtf((ex - scx) * (ex - scx) + (ey - scy) * (ey - scy)) + 0.001f);
@@ -408,13 +432,11 @@ void pageStellar() {
   labels[0].y =
       (int16_t)(ey + (ey - scy) * earthOutInv * (er + 8)) - (labels[0].h >> 1);
 
-  // Sole
   labels[1].w = 6 * strlen(sole);
   labels[1].h = 8;
   labels[1].x = scx + sunR + 14;
   labels[1].y = scy - (labels[1].h >> 1);
 
-  // Stagioni
   labels[2].w = 6 * strlen(S1s);
   labels[2].h = 8;
   labels[3].w = 6 * strlen(S2s);
@@ -433,13 +455,11 @@ void pageStellar() {
   radialLabelPos(xS4, yS4, cx, cy, labels[5].w, labels[5].h, labels[5].x,
                  labels[5].y);
 
-  // Risolvi collisioni
   const float sunRadiusSq = (sunR + 10) * (sunR + 10);
   const float erSq = (float)(er * er);
   resolveLabelConstraints(labels, 6, ex, ey, erSq, (float)scx, (float)scy,
                           sunRadiusSq, w, h, PAGE_Y);
 
-  // Disegna label
   gfx->setCursor(labels[0].x, labels[0].y);
   gfx->print(terra);
   gfx->setCursor(labels[1].x, labels[1].y);

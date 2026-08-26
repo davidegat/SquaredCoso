@@ -1,16 +1,3 @@
-/*
-===============================================================================
-   SQUARED — PAGINA "TEMP24" (Grafico Temperatura 24h)
-   Descrizione: Download dati Open-Meteo, parsing leggero dell’array daily,
-                ricostruzione curva 24h tramite 7 anchor + interpolazione
-                lineare, griglia tratteggiata, etichette dinamiche IT/EN,
-                curva spessa antialias simulato e punti con alone.
-   Autore: Davide “gat” Nasato
-   Repository: https://github.com/davidegat/SquaredCoso
-   Licenza: CC BY-NC 4.0
-===============================================================================
-*/
-
 #pragma once
 
 #include "../handlers/globals.h"
@@ -18,9 +5,6 @@
 #include <Arduino.h>
 #include <Arduino_GFX_Library.h>
 
-// ---------------------------------------------------------------------------
-// EXTERN
-// ---------------------------------------------------------------------------
 extern Arduino_RGB_Display *gfx;
 
 extern const uint16_t COL_BG;
@@ -48,9 +32,6 @@ extern String g_lang;
 extern String g_lat;
 extern String g_lon;
 
-// ---------------------------------------------------------------------------
-// Layout constants
-// ---------------------------------------------------------------------------
 static constexpr int16_t T24_MARGIN = 24;
 static constexpr int16_t T24_GRAPH_X = 60;
 static constexpr int16_t T24_GRAPH_Y = 70;
@@ -58,25 +39,15 @@ static constexpr int16_t T24_GRAPH_W = 396;
 static constexpr int16_t T24_GRAPH_H = 280;
 static constexpr int16_t T24_LABEL_Y = T24_GRAPH_Y + T24_GRAPH_H + 24;
 
-// Colori grafici
-static constexpr uint16_t T24_LINE_COL = 0x07FF;  // Cyan
-static constexpr uint16_t T24_GRID_COL = 0x2945;  // Grigio scuro
-static constexpr uint16_t T24_POINT_COL = 0xFFE0; // Giallo
+static constexpr uint16_t T24_LINE_COL = 0x07FF;
+static constexpr uint16_t T24_GRID_COL = 0x2945;
+static constexpr uint16_t T24_POINT_COL = 0xFFE0;
 
-// ---------------------------------------------------------------------------
-// Buffer temperatura 24h
-// ---------------------------------------------------------------------------
 static float t24[24];
 
-// ---------------------------------------------------------------------------
-// Stub animazione (compatibilità API)
-// ---------------------------------------------------------------------------
 void resetTemp24Anim() {}
 void tickTemp24Anim() {}
 
-// ---------------------------------------------------------------------------
-// Fetch da Open-Meteo
-// ---------------------------------------------------------------------------
 static bool fetchTemp24() {
   for (uint8_t i = 0; i < 24; i++)
     t24[i] = NAN;
@@ -94,19 +65,19 @@ static bool fetchTemp24() {
   if (!httpGET(url, body, 12000))
     return false;
 
-  int16_t posDaily = indexOfCI(body, F("\"daily\""), 0);
+  int posDaily = indexOfCI(body, F("\"daily\""), 0);
   if (posDaily < 0)
     return false;
 
-  int16_t posMean = indexOfCI(body, F("\"temperature_2m_mean\""), posDaily);
+  int posMean = indexOfCI(body, F("\"temperature_2m_mean\""), posDaily);
   if (posMean < 0)
     return false;
 
-  int16_t lb = body.indexOf('[', posMean);
+  int lb = body.indexOf('[', posMean);
   if (lb < 0)
     return false;
 
-  int16_t rb = findMatchingBracket(body, lb);
+  int rb = findMatchingBracket(body, lb);
   if (rb < 0)
     return false;
 
@@ -139,14 +110,12 @@ static bool fetchTemp24() {
   if (!idx)
     return false;
 
-  // Anchor positions per 7 valori su 24 slot
   static const uint8_t anchors[7] PROGMEM = {0, 4, 8, 12, 16, 20, 23};
 
   for (uint8_t i = 0; i < 7; i++) {
     t24[pgm_read_byte(&anchors[i])] = seven[i];
   }
 
-  // Interpolazione lineare
   for (uint8_t a = 0; a < 6; a++) {
     uint8_t x1 = pgm_read_byte(&anchors[a]);
     uint8_t x2 = pgm_read_byte(&anchors[a + 1]);
@@ -166,16 +135,10 @@ static bool fetchTemp24() {
   return true;
 }
 
-// ---------------------------------------------------------------------------
-// Helper: formatta temperatura con simbolo gradi
-// ---------------------------------------------------------------------------
 static void fmtTemp(char *buf, uint8_t bufSize, int16_t temp) {
-  snprintf_P(buf, bufSize, PSTR("%dc"), temp, 0xB0); // 0xB0 = °
+  snprintf_P(buf, bufSize, PSTR("%dc"), temp);
 }
 
-// ---------------------------------------------------------------------------
-// Helper: disegna linea griglia orizzontale tratteggiata
-// ---------------------------------------------------------------------------
 static void drawGridLineH(int16_t y) {
   for (int16_t x = T24_GRAPH_X; x < T24_GRAPH_X + T24_GRAPH_W; x += 6) {
     gfx->drawPixel(x, y, T24_GRID_COL);
@@ -183,16 +146,12 @@ static void drawGridLineH(int16_t y) {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Pagina grafico 24H
-// ---------------------------------------------------------------------------
 static void pageTemp24() {
   const bool it = (g_lang == "it");
 
   gfx->fillScreen(COL_BG);
   drawHeader(it ? F("Trend Temperatura") : F("Temperature Trend"));
 
-  // Trova min/max
   float mn = 999.0f, mx = -999.0f;
   for (uint8_t i = 0; i < 24; i++) {
     float v = t24[i];
@@ -211,7 +170,6 @@ static void pageTemp24() {
     return;
   }
 
-  // Arrotonda range per etichette pulite
   int16_t minT = (int16_t)floorf(mn);
   int16_t maxT = (int16_t)ceilf(mx);
   if (maxT - minT < 4) {
@@ -220,19 +178,14 @@ static void pageTemp24() {
   }
   float range = (float)(maxT - minT);
 
-  // === AREA GRAFICO ===
-
-  // Bordo grafico
   gfx->drawRect(T24_GRAPH_X, T24_GRAPH_Y, T24_GRAPH_W, T24_GRAPH_H,
                 T24_GRID_COL);
 
-  // Linee griglia orizzontali (5 livelli)
   for (uint8_t i = 1; i < 5; i++) {
     int16_t y = T24_GRAPH_Y + (T24_GRAPH_H * i) / 5;
     drawGridLineH(y);
   }
 
-  // Linee griglia verticali (7 giorni)
   static const uint8_t anchors[7] PROGMEM = {0, 4, 8, 12, 16, 20, 23};
   for (uint8_t i = 0; i < 7; i++) {
     uint8_t anchor = pgm_read_byte(&anchors[i]);
@@ -244,7 +197,6 @@ static void pageTemp24() {
     }
   }
 
-  // === ETICHETTE TEMPERATURA (asse Y) ===
   gfx->setTextSize(2);
   gfx->setTextColor(COL_TEXT);
 
@@ -261,7 +213,6 @@ static void pageTemp24() {
     gfx->print(buf);
   }
 
-  // === ETICHETTE GIORNI (asse X) ===
   static const char D_IT[7][4] PROGMEM = {"Lu", "Ma", "Me", "Gi",
                                           "Ve", "Sa", "Do"};
   static const char D_EN[7][4] PROGMEM = {"Mo", "Tu", "We", "Th",
@@ -290,7 +241,6 @@ static void pageTemp24() {
     gfx->print(dayBuf);
   }
 
-  // === CURVA TEMPERATURA ===
   gfx->startWrite();
 
   int16_t prevX = -1, prevY = -1;
@@ -306,13 +256,11 @@ static void pageTemp24() {
     int16_t y = T24_GRAPH_Y + T24_GRAPH_H -
                 (int16_t)(((v - minT) / range) * T24_GRAPH_H);
 
-    // Clamp dentro l'area
     if (y < T24_GRAPH_Y)
       y = T24_GRAPH_Y;
     if (y > T24_GRAPH_Y + T24_GRAPH_H)
       y = T24_GRAPH_Y + T24_GRAPH_H;
 
-    // Linea dal punto precedente
     if (prevX >= 0) {
 
       gfx->drawLine(prevX, prevY, x, y, T24_LINE_COL);
@@ -326,7 +274,6 @@ static void pageTemp24() {
 
   gfx->endWrite();
 
-  // === PUNTI DATI (solo sugli anchor) ===
   for (uint8_t i = 0; i < 7; i++) {
     uint8_t anchor = pgm_read_byte(&anchors[i]);
     float v = t24[anchor];
@@ -342,12 +289,10 @@ static void pageTemp24() {
     if (y > T24_GRAPH_Y + T24_GRAPH_H)
       y = T24_GRAPH_Y + T24_GRAPH_H;
 
-    // Punto con alone
     gfx->fillCircle(x, y, 5, T24_POINT_COL);
     gfx->drawCircle(x, y, 6, T24_LINE_COL);
   }
 
-  // === LEGENDA MIN/MAX ===
   gfx->setTextSize(TEXT_SCALE);
   gfx->setTextColor(COL_TEXT);
 

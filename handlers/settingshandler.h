@@ -1,26 +1,12 @@
-/*
-===============================================================================
-   SQUARED — SETTINGS HANDLER (NVS + WebUI)
-   Descrizione: Parsing POST dalla WebUI, aggiornamento variabili globali,
-                caricamento/salvataggio su NVS (namespace “app”), gestione
-                mask 32-bit per pagine visibili, boot-restore e validazione
-                dati essenziali. Modulo centrale della configurazione.
-   Autore: Davide “gat” Nasato
-   Repository: https://github.com/davidegat/SquaredCoso
-   Licenza: CC BY-NC 4.0
-===============================================================================
-*/
-
 #pragma once
 
 #include "globals.h"
 #include <Arduino.h>
 #include <Preferences.h>
 #include <WebServer.h>
+#include <time.h>
+#include <stdlib.h>
 
-// ---------------------------------------------------------------------------
-// CHIAVI NVS PER LE PAGINE
-// ---------------------------------------------------------------------------
 static const char *PAGE_KEYS[PAGES] = {
     "p_WEATHER", "p_AIR",  "p_CLOCK",   "p_BINARY", "p_CAL",    "p_BTC",
     "p_QOD",     "p_INFO", "p_COUNT",   "p_FX",     "p_T24",    "p_SUN",
@@ -28,287 +14,49 @@ static const char *PAGE_KEYS[PAGES] = {
 
 extern WebServer web;
 extern Preferences prefs;
-
 extern bool g_splash_enabled;
-extern bool g_forceRedraw;
-
 extern void ensureCurrentPageEnabled();
 extern uint32_t pagesMaskFromArray();
 extern void pagesArrayFromMask(uint32_t mask);
 
-// ============================================================================
-// handleSettings() — Gestione POST e salvataggio su NVS
-// ============================================================================
-void handleSettings() {
-
-  bool saved = false;
-
-  if (web.method() == HTTP_POST) {
-
-    // ----------------------------------------------------------
-    // PARAMETRI BASE
-    // ----------------------------------------------------------
-    String city = web.arg("city");
-    city.trim();
-    String lang = web.arg("lang");
-    lang.trim();
-    String ics = web.arg("ics");
-    ics.trim();
-
-    if (city.length())
-      g_city = city;
-    g_lang = (lang == "it" || lang == "en") ? lang : "it";
-    g_ics = ics;
-
-    // Intervallo pagina (5–600s)
-    if (web.hasArg("page_s")) {
-      long ps = web.arg("page_s").toInt();
-      if (ps < 5)
-        ps = 5;
-      if (ps > 600)
-        ps = 600;
-      PAGE_INTERVAL_MS = ps * 1000UL;
-    }
-
-    // -------- Post-it --------
-    if (web.hasArg("note"))
-      g_note = sanitizeText(web.arg("note"));
-    else
-      g_note = "";
-
-    // -------- Fiat base --------
-    if (web.hasArg("fiat")) {
-      g_fiat = web.arg("fiat");
-      g_fiat.trim();
-      g_fiat.toUpperCase();
-    }
-
-    // ----------------------------------------------------------
-    // HOME ASSISTANT
-    // ----------------------------------------------------------
-    if (web.hasArg("ha_ip")) {
-      g_ha_ip = sanitizeText(web.arg("ha_ip"));
-      g_ha_ip.trim();
-      if (g_ha_ip.startsWith("http://"))
-        g_ha_ip.remove(0, 7);
-      if (g_ha_ip.startsWith("https://"))
-        g_ha_ip.remove(0, 8);
-      if (g_ha_ip.endsWith("/"))
-        g_ha_ip.remove(g_ha_ip.length() - 1);
-    }
-
-    if (web.hasArg("ha_token")) {
-      g_ha_token = sanitizeText(web.arg("ha_token"));
-      g_ha_token.trim();
-    }
-
-    // ----------------------------------------------------------
-    // BITCOIN
-    // ----------------------------------------------------------
-    if (web.hasArg("btc_owned")) {
-      String s = web.arg("btc_owned");
-      s.trim();
-      g_btc_owned = s.length() ? s.toDouble() : NAN;
-    }
-
-    // ----------------------------------------------------------
-    // OPENAI
-    // ----------------------------------------------------------
-    g_oa_key = sanitizeText(web.arg("openai_key"));
-    g_oa_topic = sanitizeText(web.arg("openai_topic"));
-
-    // ----------------------------------------------------------
-    // RSS
-    // ----------------------------------------------------------
-    if (web.hasArg("rss_url")) {
-      g_rss_url = sanitizeText(web.arg("rss_url"));
-      g_rss_url.trim();
-    }
-
-    // ----------------------------------------------------------
-    // SPLASH IMAGES
-    // ----------------------------------------------------------
-    g_splash_enabled = web.hasArg("splash_enabled");
-
-    // ----------------------------------------------------------
-    // COUNTDOWN
-    // ----------------------------------------------------------
-    for (int i = 0; i < 8; i++) {
-      char kn[6], kt[6];
-      snprintf(kn, sizeof(kn), "cd%dn", i + 1);
-      snprintf(kt, sizeof(kt), "cd%dt", i + 1);
-      cd[i].name = sanitizeText(web.arg(kn));
-      cd[i].whenISO = sanitizeText(web.arg(kt));
-    }
-
-    // ----------------------------------------------------------
-    // PAGINE VISIBILI
-    // ----------------------------------------------------------
-    for (int i = 0; i < PAGES; i++)
-      g_show[i] = web.hasArg(PAGE_KEYS[i]);
-
-    // Almeno una pagina deve restare attiva
-    bool any = false;
-    for (int i = 0; i < PAGES; i++)
-      if (g_show[i]) {
-        any = true;
-        break;
-      }
-
-    if (!any)
-      g_show[P_CLOCK] = true;
-
-    // ----------------------------------------------------------
-    // SALVATAGGIO SU NVS
-    // ----------------------------------------------------------
-    prefs.begin("app", false);
-
-    prefs.putString("city", g_city);
-    prefs.putString("lang", g_lang);
-    prefs.putString("ics", g_ics);
-    prefs.putString("lat", g_lat);
-    prefs.putString("lon", g_lon);
-
-    prefs.putBool("splash", g_splash_enabled);
-
-    prefs.putString("ha_ip", g_ha_ip);
-    prefs.putString("ha_token", g_ha_token);
-
-    prefs.putULong("page_ms", PAGE_INTERVAL_MS);
-
-    prefs.putString("fiat", g_fiat);
-    prefs.putString("rss_url", g_rss_url);
-    prefs.putString("oa_key", g_oa_key);
-    prefs.putString("oa_topic", g_oa_topic);
-    prefs.putString("note", g_note);
-
-    // BTC — salvato come stringa con precisione a 8 decimali
-    prefs.putString("btc_owned", String(g_btc_owned, 8));
-
-    // Countdown
-    for (int i = 0; i < 8; i++) {
-      char kn[6], kt[6];
-      snprintf(kn, sizeof(kn), "cd%dn", i + 1);
-      snprintf(kt, sizeof(kt), "cd%dt", i + 1);
-      prefs.putString(kn, cd[i].name);
-      prefs.putString(kt, cd[i].whenISO);
-    }
-
-    // Maschera pagine
-    prefs.putUInt("pages_mask", pagesMaskFromArray());
-
-    prefs.end();
-
-    ensureCurrentPageEnabled();
-    g_dataRefreshPending = true;
-    saved = true;
-  }
-
-  web.send(200, "text/html; charset=utf-8", htmlSettings(saved, ""));
+static inline String cleanHAHost(String s) {
+  s.trim();
+  if (s.startsWith("http://")) s.remove(0, 7);
+  if (s.startsWith("https://")) s.remove(0, 8);
+  while (s.endsWith("/")) s.remove(s.length() - 1);
+  return s;
 }
 
-// ============================================================================
-// loadAppConfig() — Caricamento completo configurazione NVS
-// ============================================================================
-void loadAppConfig() {
-
-  prefs.begin("app", true);
-
-  g_city = prefs.getString("city", g_city);
-  g_lang = prefs.getString("lang", g_lang);
-  g_ics = prefs.getString("ics", g_ics);
-  g_lat = prefs.getString("lat", g_lat);
-  g_lon = prefs.getString("lon", g_lon);
-
-  g_note = prefs.getString("note", "");
-
-  g_fiat = prefs.getString("fiat", "CHF");
-  g_fiat.trim();
-  g_fiat.toUpperCase();
-
-  g_splash_enabled = prefs.getBool("splash", true);
-
-  g_ha_ip = prefs.getString("ha_ip", "");
-  g_ha_token = prefs.getString("ha_token", "");
-
-  g_ha_ip.trim();
-  g_ha_token.trim();
-  if (g_ha_ip.startsWith("http://"))
-    g_ha_ip.remove(0, 7);
-  if (g_ha_ip.startsWith("https://"))
-    g_ha_ip.remove(0, 8);
-  if (g_ha_ip.endsWith("/"))
-    g_ha_ip.remove(g_ha_ip.length() - 1);
-
-  PAGE_INTERVAL_MS = prefs.getULong("page_ms", PAGE_INTERVAL_MS);
-
-  g_oa_key = prefs.getString("oa_key", g_oa_key);
-  g_oa_topic = prefs.getString("oa_topic", g_oa_topic);
-
-  g_rss_url = prefs.getString("rss_url", g_rss_url);
-  g_rss_url.trim();
-
-  // BTC — letto simmetricamente come stringa
-  {
-    String btc = prefs.getString("btc_owned", "");
-    btc.trim();
-    g_btc_owned = btc.length() ? btc.toDouble() : NAN;
-  }
-
-  // Countdown
-  for (int i = 0; i < 8; i++) {
-    char kn[6], kt[6];
-    snprintf(kn, sizeof(kn), "cd%dn", i + 1);
-    snprintf(kt, sizeof(kt), "cd%dt", i + 1);
-    cd[i].name = prefs.getString(kn, "");
-    cd[i].whenISO = prefs.getString(kt, "");
-  }
-
-  // Pagine visibili
-  uint32_t mask = prefs.getUInt("pages_mask", 0xFFFFFFFF);
-
-  prefs.end();
-
-  pagesArrayFromMask(mask);
-
-  // intervallo pagina
-  uint32_t s = PAGE_INTERVAL_MS / 1000;
-  if (s < 5)
-    PAGE_INTERVAL_MS = 5000;
-  if (s > 600)
-    PAGE_INTERVAL_MS = 600000;
-
-  g_oa_key.trim();
-  g_oa_topic.trim();
+static inline String cleanEntityList(String s) {
+  s.replace("\r", "");
+  s.replace("\n", ",");
+  s.replace(";", ",");
+  while (s.indexOf("  ") >= 0) s.replace("  ", " ");
+  s.trim();
+  return s;
 }
 
-// ============================================================================
-// saveAppConfig() — Salvataggio rapido
-// ============================================================================
 void saveAppConfig() {
-
   prefs.begin("app", false);
-
-  prefs.putString("fiat", g_fiat);
   prefs.putString("city", g_city);
   prefs.putString("lang", g_lang);
   prefs.putString("ics", g_ics);
   prefs.putString("lat", g_lat);
   prefs.putString("lon", g_lon);
-
+  prefs.putString("tz_rule", g_tz_rule);
+  prefs.putUChar("rotation", g_rotation & 3);
+  prefs.putBool("splash", g_splash_enabled);
+  prefs.putString("ha_ip", g_ha_ip);
+  prefs.putString("ha_token", g_ha_token);
+  prefs.putString("ha_entities", g_ha_entities);
+  prefs.putULong("page_ms", PAGE_INTERVAL_MS);
+  prefs.putString("fiat", g_fiat);
   prefs.putString("rss_url", g_rss_url);
   prefs.putString("oa_key", g_oa_key);
   prefs.putString("oa_topic", g_oa_topic);
+  prefs.putString("note", g_note);
+  prefs.putString("btc_owned", isnan(g_btc_owned) ? "" : String(g_btc_owned, 8));
 
-  prefs.putString("ha_ip", g_ha_ip);
-  prefs.putString("ha_token", g_ha_token);
-
-  prefs.putULong("page_ms", PAGE_INTERVAL_MS);
-
-  // BTC simmetrico
-  prefs.putString("btc_owned", String(g_btc_owned, 8));
-
-  // Countdown
   for (int i = 0; i < 8; i++) {
     char kn[6], kt[6];
     snprintf(kn, sizeof(kn), "cd%dn", i + 1);
@@ -316,9 +64,160 @@ void saveAppConfig() {
     prefs.putString(kn, cd[i].name);
     prefs.putString(kt, cd[i].whenISO);
   }
-
-  // Maschera pagine su 32 bit
   prefs.putUInt("pages_mask", pagesMaskFromArray());
-
   prefs.end();
+}
+
+void handleSettings() {
+  bool saved = false;
+
+  if (web.method() == HTTP_POST) {
+    String city = web.arg("city"); city.trim();
+    String lang = web.arg("lang"); lang.trim();
+    String ics = web.arg("ics"); ics.trim();
+
+    if (city.length() && city != g_city) {
+      g_city = city;
+      g_lat = "";
+      g_lon = "";
+    }
+    g_lang = (lang == "it" || lang == "en") ? lang : "it";
+    g_ics = ics;
+
+    if (web.hasArg("tz_preset")) {
+      String preset = web.arg("tz_preset"); preset.trim();
+      if (preset == "europe") {
+        g_tz_rule = "CET-1CEST,M3.5.0,M10.5.0/3";
+      } else if (preset == "utc") {
+        g_tz_rule = "UTC0";
+      } else if (preset == "custom" && web.hasArg("tz_custom")) {
+        String tz = web.arg("tz_custom"); tz.trim();
+        if (tz.length() >= 3 && tz.length() <= 96) g_tz_rule = tz;
+      }
+    } else if (web.hasArg("tz_rule")) {
+
+      String tz = web.arg("tz_rule"); tz.trim();
+      if (tz.length() >= 3 && tz.length() <= 96) g_tz_rule = tz;
+    }
+
+    if (web.hasArg("rotation")) {
+      int r = web.arg("rotation").toInt();
+      g_rotation = (uint8_t)constrain(r, 0, 3);
+    }
+
+    if (web.hasArg("page_s")) {
+      long ps = constrain(web.arg("page_s").toInt(), 5L, 600L);
+      PAGE_INTERVAL_MS = (uint32_t)ps * 1000UL;
+    }
+
+    g_note = web.hasArg("note") ? web.arg("note") : "";
+
+    if (web.hasArg("fiat")) {
+      g_fiat = web.arg("fiat"); g_fiat.trim(); g_fiat.toUpperCase();
+      if (g_fiat.length() != 3) g_fiat = "CHF";
+    }
+
+    if (web.hasArg("ha_ip")) g_ha_ip = cleanHAHost(web.arg("ha_ip"));
+    if (web.hasArg("ha_entities")) g_ha_entities = cleanEntityList(web.arg("ha_entities"));
+
+    // Blank secret fields keep the stored value; explicit clear flags remove it.
+    if (web.hasArg("clear_ha_token")) {
+      g_ha_token = "";
+    } else if (web.hasArg("ha_token")) {
+      String v = web.arg("ha_token"); v.trim();
+      if (v.length()) g_ha_token = v;
+    }
+
+    if (web.hasArg("btc_owned")) {
+      String v = web.arg("btc_owned"); v.trim();
+      g_btc_owned = v.length() ? v.toDouble() : NAN;
+    }
+
+    if (web.hasArg("clear_openai_key")) {
+      g_oa_key = "";
+    } else if (web.hasArg("openai_key")) {
+      String v = web.arg("openai_key"); v.trim();
+      if (v.length()) g_oa_key = v;
+    }
+    if (web.hasArg("openai_topic")) {
+      g_oa_topic = web.arg("openai_topic"); g_oa_topic.trim();
+    }
+
+    if (web.hasArg("rss_url")) {
+      g_rss_url = web.arg("rss_url"); g_rss_url.trim();
+    }
+
+    g_splash_enabled = web.hasArg("splash_enabled");
+
+    setenv("TZ", g_tz_rule.c_str(), 1);
+    tzset();
+
+    for (int i = 0; i < 8; i++) {
+      char kn[6], kt[6];
+      snprintf(kn, sizeof(kn), "cd%dn", i + 1);
+      snprintf(kt, sizeof(kt), "cd%dt", i + 1);
+      cd[i].name = web.arg(kn); cd[i].name.trim();
+      cd[i].whenISO = web.arg(kt); cd[i].whenISO.trim();
+    }
+
+    for (int i = 0; i < PAGES; i++) g_show[i] = web.hasArg(PAGE_KEYS[i]);
+    bool any = false;
+    for (int i = 0; i < PAGES; i++) any |= g_show[i];
+    if (!any) g_show[P_CLOCK] = true;
+
+    saveAppConfig();
+    ensureCurrentPageEnabled();
+    applyDisplayRotation();
+    softReboot();
+    saved = true;
+  }
+
+  web.send(200, "text/html; charset=utf-8", htmlSettings(saved, ""));
+}
+
+void loadAppConfig() {
+  prefs.begin("app", true);
+  g_city = prefs.getString("city", g_city);
+  g_lang = prefs.getString("lang", g_lang);
+  g_ics = prefs.getString("ics", g_ics);
+  g_lat = prefs.getString("lat", g_lat);
+  g_lon = prefs.getString("lon", g_lon);
+  g_tz_rule = prefs.getString("tz_rule", g_tz_rule);
+  g_rotation = prefs.getUChar("rotation", 0) & 3;
+  g_note = prefs.getString("note", "");
+  g_fiat = prefs.getString("fiat", "CHF");
+  g_splash_enabled = prefs.getBool("splash", true);
+  g_ha_ip = prefs.getString("ha_ip", "");
+  g_ha_token = prefs.getString("ha_token", "");
+  g_ha_entities = prefs.getString("ha_entities", "");
+  PAGE_INTERVAL_MS = prefs.getULong("page_ms", PAGE_INTERVAL_MS);
+  g_oa_key = prefs.getString("oa_key", g_oa_key);
+  g_oa_topic = prefs.getString("oa_topic", g_oa_topic);
+  g_rss_url = prefs.getString("rss_url", g_rss_url);
+
+  String btc = prefs.getString("btc_owned", "");
+  btc.trim();
+  g_btc_owned = btc.length() ? btc.toDouble() : NAN;
+
+  for (int i = 0; i < 8; i++) {
+    char kn[6], kt[6];
+    snprintf(kn, sizeof(kn), "cd%dn", i + 1);
+    snprintf(kt, sizeof(kt), "cd%dt", i + 1);
+    cd[i].name = prefs.getString(kn, "");
+    cd[i].whenISO = prefs.getString(kt, "");
+  }
+  uint32_t mask = prefs.getUInt("pages_mask", 0xFFFFFFFFUL);
+  prefs.end();
+
+  pagesArrayFromMask(mask);
+  PAGE_INTERVAL_MS = constrain(PAGE_INTERVAL_MS, 5000UL, 600000UL);
+  g_fiat.trim(); g_fiat.toUpperCase();
+  if (g_fiat.length() != 3) g_fiat = "CHF";
+  g_ha_ip = cleanHAHost(g_ha_ip);
+  g_ha_token.trim();
+  g_ha_entities = cleanEntityList(g_ha_entities);
+  g_oa_key.trim();
+  g_oa_topic.trim();
+  g_rss_url.trim();
+  if (g_tz_rule.length() < 3) g_tz_rule = "CET-1CEST,M3.5.0,M10.5.0/3";
 }

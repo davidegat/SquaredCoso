@@ -1,21 +1,10 @@
-/*
-===============================================================================
-   SQUARED — PAGINA "SquaredNotes" (Post-it)
-   Descrizione: Post-it digitale con sfondo giallo, header decorativo,
-                font scritto a mano (IndieFlower), word-wrap con GFXfont,
-                centratura verticale dinamica e sanitizzazione UTF-8.
-   Autore: Davide “gat” Nasato
-   Repository: https://github.com/davidegat/SquaredCoso
-   Licenza: CC BY-NC 4.0
-===============================================================================
-*/
-
 #pragma once
 
 #include "../fonts/IndieFlower_Regular20pt7b.h"
 #include "../handlers/globals.h"
 #include <Arduino.h>
 #include <Arduino_GFX_Library.h>
+#include <vector>
 
 extern Arduino_RGB_Display *gfx;
 
@@ -26,20 +15,13 @@ extern const int TEXT_SCALE;
 extern String g_note;
 extern String sanitizeText(const String &in);
 
-// ---------------------------------------------------------------------------
-// Colori post-it
-// ---------------------------------------------------------------------------
-static const uint16_t NOTE_BG = 0xFFE0; // giallo chiaro (sfondo)
+static const uint16_t NOTE_BG = 0xFFE0;
 static const uint16_t NOTE_DARK =
-    0xFEC0; // giallo medio-chiaro header/triangolo
-static const uint16_t NOTE_TEXT = 0x0000; // nero
+    0xFEC0;
+static const uint16_t NOTE_TEXT = 0x0000;
 
-// Altezza header
 static const int NOTE_HEADER_H = 40;
 
-// ---------------------------------------------------------------------------
-// Calcolo bounding box (con GFXfont serve SEMPRE)
-// ---------------------------------------------------------------------------
 static void measureText(const String &s, int &w, int &h) {
   int16_t x1, y1;
   uint16_t ww, hh;
@@ -48,20 +30,15 @@ static void measureText(const String &s, int &w, int &h) {
   h = hh;
 }
 
-// ---------------------------------------------------------------------------
-// Pagina NOTA
-// ---------------------------------------------------------------------------
 void pageNotes() {
-  // sfondo
+
   gfx->fillScreen(NOTE_BG);
 
-  // header
   gfx->fillRect(0, 0, 480, NOTE_HEADER_H, NOTE_DARK);
 
-  // triangolo decorativo
-  int x0 = 0, y0 = 480;
+  int y0 = 480;
   int x1 = 0, y1 = 380;
-  int x2 = 100, y2 = 480;
+  int x2 = 100;
 
   for (int y = y1; y <= y0; y++) {
     float t = float(y - y1) / float(y0 - y1);
@@ -69,21 +46,17 @@ void pageNotes() {
     gfx->drawFastHLine(x1, y, xm, NOTE_DARK);
   }
 
-  // testo
   String txt = sanitizeText(g_note);
   if (!txt.length())
     txt = (g_lang == "it" ? "(vuoto)" : "(empty)");
 
-  // imposta font IndieFlower
   gfx->setFont(&IndieFlower_Regular20pt7b);
   gfx->setTextColor(NOTE_TEXT, NOTE_BG);
-  gfx->setTextSize(1); // SEMPRE 1 con GFXfont
+  gfx->setTextSize(1);
 
-  // area disponibile
   const int MAX_W = PAGE_W - 40;
   const int MAX_H = PAGE_H - NOTE_HEADER_H - 40;
 
-  // word-wrap
   std::vector<String> lines;
   {
     std::vector<String> words;
@@ -116,17 +89,14 @@ void pageNotes() {
       lines.push_back(current);
   }
 
-  // misura altezza totale
   int line_w, line_h;
   measureText("Ag", line_w, line_h);
   int total_h = line_h * lines.size();
 
-  // centratura verticale
   int start_y = NOTE_HEADER_H + (MAX_H - total_h) / 2;
   if (start_y < NOTE_HEADER_H + 20)
     start_y = NOTE_HEADER_H + 20;
 
-  // stampa
   int y = start_y;
   for (auto &L : lines) {
     int w, h;
@@ -141,6 +111,5 @@ void pageNotes() {
       break;
   }
 
-  // ripristina font di default
   gfx->setFont(NULL);
 }
