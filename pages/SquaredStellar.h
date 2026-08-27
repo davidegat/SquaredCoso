@@ -205,6 +205,47 @@ static void drawEarth(float ex, float ey, int16_t er, float lx, float ly) {
   }
 }
 
+static const uint16_t MOON_LIGHT = 0xD69A;
+static const uint16_t MOON_DARK = 0x4208;
+static const uint16_t MOON_ORBIT = 0x39E7;
+
+// Draw the Moon as a tiny sphere illuminated from the real Sun direction.
+static void drawStellarMoon(float mx, float my, int16_t mr, float sxDir,
+                            float syDir) {
+  const int16_t mrSq = mr * mr;
+
+  for (int16_t dy = -mr; dy <= mr; dy++) {
+    const int16_t dy2 = dy * dy;
+    for (int16_t dx = -mr; dx <= mr; dx++) {
+      if (dx * dx + dy2 > mrSq)
+        continue;
+
+      const float nx = dx / (float)mr;
+      const float ny = dy / (float)mr;
+      const float dot = nx * sxDir + ny * syDir;
+      const uint16_t c = (dot >= -0.08f) ? MOON_LIGHT : MOON_DARK;
+      gfx->drawPixel((int16_t)mx + dx, (int16_t)my + dy, c);
+    }
+  }
+
+  gfx->drawCircle((int16_t)mx, (int16_t)my, mr, COL_DIVIDER);
+}
+
+// Geocentric Sun-Moon elongation: 0=new moon, PI=full moon.
+// Prefer the continuous MoonCal lunation phase already fetched by LIGHT; when
+// unavailable, use a synodic-month fallback anchored to the 2000-01-06 new moon.
+static float stellarMoonElongation(time_t nowUTC) {
+  if (g_moon_phase01 >= 0.0f && g_moon_phase01 < 1.0f)
+    return g_moon_phase01 * TWO_PI;
+
+  const double jd = 2440587.5 + ((double)nowUTC / 86400.0);
+  const double synodicMonth = 29.530588853;
+  double phase = fmod((jd - 2451550.25972) / synodicMonth, 1.0);
+  if (phase < 0.0)
+    phase += 1.0;
+  return (float)(phase * TWO_PI);
+}
+
 static inline float normAng(float a) {
   while (a < 0)
     a += TWO_PI;
@@ -408,69 +449,64 @@ void pageStellar() {
   lx /= ll;
   ly /= ll;
 
+  // The real Earth-Moon distance would be invisible at this scale, so only
+  // the orbital angle is astronomical; the displayed lunar orbit is enlarged.
+  const int16_t moonOrbitR = 31;
+  const int16_t moonR = 5;
+  const float sunFromEarthAng = atan2f(scy - ey, scx - ex);
+  const float moonElong = stellarMoonElongation(now);
+  const float moonAng = sunFromEarthAng - moonElong;
+  const float mx = ex + moonOrbitR * cosf(moonAng);
+  const float my = ey + moonOrbitR * sinf(moonAng);
+
+  gfx->drawCircle((int16_t)ex, (int16_t)ey, moonOrbitR, MOON_ORBIT);
   drawEarth(ex, ey, er, lx, ly);
+
+  float mlx = scx - mx, mly = scy - my;
+  const float mll = sqrtf(mlx * mlx + mly * mly) + 0.001f;
+  mlx /= mll;
+  mly /= mll;
+  drawStellarMoon(mx, my, moonR, mlx, mly);
 
   gfx->setTextSize(1);
   gfx->setTextColor(COL_TEXT, BG);
 
-  const char *const terra = isItalian ? "Terra" : "Earth";
-  const char *const sole = isItalian ? "Sole" : "Sun";
   const char *const S1s = isItalian ? "Eq. Primavera" : "Spring Eq.";
   const char *const S2s = isItalian ? "Sol. Estate" : "Summer Sol.";
   const char *const S3s = isItalian ? "Eq. Autunno" : "Autumn Eq.";
   const char *const S4s = isItalian ? "Sol. Inverno" : "Winter Sol.";
 
-  Label labels[6];
-
-  const float earthOutInv =
-      1.0f /
-      (sqrtf((ex - scx) * (ex - scx) + (ey - scy) * (ey - scy)) + 0.001f);
-  labels[0].w = 6 * strlen(terra);
+  Label labels[4];
+  labels[0].w = 6 * strlen(S1s);
   labels[0].h = 8;
-  labels[0].x =
-      (int16_t)(ex + (ex - scx) * earthOutInv * (er + 8)) - (labels[0].w >> 1);
-  labels[0].y =
-      (int16_t)(ey + (ey - scy) * earthOutInv * (er + 8)) - (labels[0].h >> 1);
-
-  labels[1].w = 6 * strlen(sole);
+  labels[1].w = 6 * strlen(S2s);
   labels[1].h = 8;
-  labels[1].x = scx + sunR + 14;
-  labels[1].y = scy - (labels[1].h >> 1);
-
-  labels[2].w = 6 * strlen(S1s);
+  labels[2].w = 6 * strlen(S3s);
   labels[2].h = 8;
-  labels[3].w = 6 * strlen(S2s);
+  labels[3].w = 6 * strlen(S4s);
   labels[3].h = 8;
-  labels[4].w = 6 * strlen(S3s);
-  labels[4].h = 8;
-  labels[5].w = 6 * strlen(S4s);
-  labels[5].h = 8;
 
-  radialLabelPos(xS1, yS1, cx, cy, labels[2].w, labels[2].h, labels[2].x,
+  radialLabelPos(xS1, yS1, cx, cy, labels[0].w, labels[0].h, labels[0].x,
+                 labels[0].y);
+  radialLabelPos(xS2, yS2, cx, cy, labels[1].w, labels[1].h, labels[1].x,
+                 labels[1].y);
+  radialLabelPos(xS3, yS3, cx, cy, labels[2].w, labels[2].h, labels[2].x,
                  labels[2].y);
-  radialLabelPos(xS2, yS2, cx, cy, labels[3].w, labels[3].h, labels[3].x,
+  radialLabelPos(xS4, yS4, cx, cy, labels[3].w, labels[3].h, labels[3].x,
                  labels[3].y);
-  radialLabelPos(xS3, yS3, cx, cy, labels[4].w, labels[4].h, labels[4].x,
-                 labels[4].y);
-  radialLabelPos(xS4, yS4, cx, cy, labels[5].w, labels[5].h, labels[5].x,
-                 labels[5].y);
 
   const float sunRadiusSq = (sunR + 10) * (sunR + 10);
   const float erSq = (float)(er * er);
-  resolveLabelConstraints(labels, 6, ex, ey, erSq, (float)scx, (float)scy,
+  resolveLabelConstraints(labels, 4, ex, ey, erSq, (float)scx, (float)scy,
                           sunRadiusSq, w, h, PAGE_Y);
 
   gfx->setCursor(labels[0].x, labels[0].y);
-  gfx->print(terra);
-  gfx->setCursor(labels[1].x, labels[1].y);
-  gfx->print(sole);
-  gfx->setCursor(labels[2].x, labels[2].y);
   gfx->print(S1s);
-  gfx->setCursor(labels[3].x, labels[3].y);
+  gfx->setCursor(labels[1].x, labels[1].y);
   gfx->print(S2s);
-  gfx->setCursor(labels[4].x, labels[4].y);
+  gfx->setCursor(labels[2].x, labels[2].y);
   gfx->print(S3s);
-  gfx->setCursor(labels[5].x, labels[5].y);
+  gfx->setCursor(labels[3].x, labels[3].y);
   gfx->print(S4s);
 
   gfx->setTextSize(TEXT_SCALE);

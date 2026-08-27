@@ -57,6 +57,7 @@ static char sun_uvi[8];
 
 static float g_moon_illum01 = -1.0f;
 static bool g_moon_waxing = true;
+static float g_moon_phase01 = -1.0f;
 
 static uint8_t g_moon_phase_idx = 0;
 
@@ -212,6 +213,7 @@ static void interpolatePhase(const MoonEvent &prev, const MoonEvent &next,
     g_moon_illum01 = -1;
     g_moon_phase_idx = 0;
     g_moon_waxing = true;
+    g_moon_phase01 = -1.0f;
     return;
   }
 
@@ -220,6 +222,7 @@ static void interpolatePhase(const MoonEvent &prev, const MoonEvent &next,
     g_moon_illum01 = -1;
     g_moon_phase_idx = 0;
     g_moon_waxing = true;
+    g_moon_phase01 = -1.0f;
     return;
   }
 
@@ -236,6 +239,9 @@ static void interpolatePhase(const MoonEvent &prev, const MoonEvent &next,
 
   float pf = p0 + pos * (p1 - p0);
   g_moon_phase_idx = ((uint8_t)roundf(pf)) % 8;
+  g_moon_phase01 = fmodf(pf * (1.0f / 8.0f), 1.0f);
+  if (g_moon_phase01 < 0.0f)
+    g_moon_phase01 += 1.0f;
 
   if (prev.phase4 == 0 && next.phase4 == 1) {
 
@@ -295,6 +301,7 @@ bool fetchSun() {
   g_moon_illum01 = -1;
   g_moon_phase_idx = 0;
   g_moon_waxing = true;
+  g_moon_phase01 = -1.0f;
 
   float lat, lon;
   if (!fetchLatLon(lat, lon))
@@ -427,12 +434,13 @@ bool fetchSun() {
   return true;
 }
 
-static inline void sunRow(const char *label, const char *val, int &y) {
+static inline void sunRowColored(const char *label, const char *val, int &y,
+                                 uint16_t labelColor) {
   const int SZ = TEXT_SCALE + 1;
   const int H = BASE_CHAR_H * SZ + 8;
 
   gfx->setTextSize(SZ);
-  gfx->setTextColor(COL_ACCENT1);
+  gfx->setTextColor(labelColor);
   gfx->setCursor(PAGE_X, y);
   gfx->print(label);
 
@@ -445,6 +453,22 @@ static inline void sunRow(const char *label, const char *val, int &y) {
   gfx->print(val);
 
   y += H;
+}
+
+static inline void sunRow(const char *label, const char *val, int &y) {
+  sunRowColored(label, val, y, COL_ACCENT1);
+}
+
+static uint16_t uvLabelColor() {
+  if (sun_uvi[0] == '-')
+    return COL_ACCENT1;
+
+  const float uv = atof(sun_uvi);
+  if (uv < 3.0f)
+    return 0x07E0; // verde: basso (0-2)
+  if (uv < 6.0f)
+    return 0xFFE0; // giallo: moderato (3-5)
+  return 0xF800;   // rosso: alto o superiore (6+)
 }
 
 static void buildMoonPhaseLabel(bool it, char out[32]) {
@@ -525,7 +549,7 @@ void pageSun() {
   sunRow(it ? "Durata luce" : "Day length", sun_len, y);
   sunRow(it ? "Civile inizio" : "Civil begin", sun_cb, y);
   sunRow(it ? "Civile fine" : "Civil end", sun_ce, y);
-  sunRow(it ? "Indice UV" : "UV index", sun_uvi, y);
+  sunRowColored(it ? "Indice UV" : "UV index", sun_uvi, y, uvLabelColor());
 
   char label[32];
   buildMoonPhaseLabel(it, label);

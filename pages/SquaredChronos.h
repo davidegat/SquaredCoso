@@ -145,37 +145,55 @@ static void drawRowC(int16_t y, const __FlashStringHelper *label,
   gfx->print(sub);
 }
 
-static void drawHuman(const ChProg &p) {
+static void drawHuman(const ChProg &p, bool it) {
   gfx->setTextSize(TEXT_SCALE);
 
   int16_t y = SEC_HUMAN_Y;
-  drawRowH(y, F("Today"), p.day, COL_ACCENT1);
-  drawRowH(y + CH_ROW_H, F("Week"), p.week, COL_ACCENT1);
-  drawRowH(y + CH_ROW_H * 2, F("Month"), p.month, COL_ACCENT1);
-  drawRowH(y + CH_ROW_H * 3, F("Year"), p.year, COL_ACCENT2);
-  drawRowH(y + CH_ROW_H * 4, F("Century"), p.century, COL_ACCENT2);
+  if (it) {
+    drawRowH(y, F("Oggi"), p.day, COL_ACCENT1);
+    drawRowH(y + CH_ROW_H, F("Settimana"), p.week, COL_ACCENT1);
+    drawRowH(y + CH_ROW_H * 2, F("Mese"), p.month, COL_ACCENT1);
+    drawRowH(y + CH_ROW_H * 3, F("Anno"), p.year, COL_ACCENT2);
+    drawRowH(y + CH_ROW_H * 4, F("Secolo"), p.century, COL_ACCENT2);
+  } else {
+    drawRowH(y, F("Today"), p.day, COL_ACCENT1);
+    drawRowH(y + CH_ROW_H, F("Week"), p.week, COL_ACCENT1);
+    drawRowH(y + CH_ROW_H * 2, F("Month"), p.month, COL_ACCENT1);
+    drawRowH(y + CH_ROW_H * 3, F("Year"), p.year, COL_ACCENT2);
+    drawRowH(y + CH_ROW_H * 4, F("Century"), p.century, COL_ACCENT2);
+  }
 }
 
-static void drawCosmic() {
+static void drawCosmic(bool it) {
   gfx->setTextSize(TEXT_SCALE);
 
-  drawRowC(SEC_COSMIC_Y, F("Earth / Universe"), F("4.54 / 13.8 Ga"),
-           PCT_EARTH, COL_ACCENT2);
-  drawRowC(SEC_COSMIC_Y + CH_ROW_H_C, F("Sun main seq."), F("4.6 / ~10 Ga"),
-           PCT_SUN, COL_ACCENT1);
+  if (it) {
+    drawRowC(SEC_COSMIC_Y, F("Eta Terra / Universo"),
+             F("Terra 4,54 / Universo 13,8 mld anni"), PCT_EARTH, COL_ACCENT2);
+    drawRowC(SEC_COSMIC_Y + CH_ROW_H_C, F("Vita stabile del Sole"),
+             F("Trascorsi 4,6 su ~10 mld anni"), PCT_SUN, COL_ACCENT1);
+  } else {
+    drawRowC(SEC_COSMIC_Y, F("Earth / Universe"), F("4.54 / 13.8 Ga"),
+             PCT_EARTH, COL_ACCENT2);
+    drawRowC(SEC_COSMIC_Y + CH_ROW_H_C, F("Sun main sequence"),
+             F("4.6 / ~10 Ga"), PCT_SUN, COL_ACCENT1);
+  }
 }
 
-static void drawUniverse() {
+static void drawUniverse(bool it) {
   const int16_t y = SEC_UNIV_Y;
 
   gfx->setTextSize(TEXT_SCALE);
+  const char *title = it ? "Storia dell'Universo" : "Universe Timeline";
+  const char *age = it ? "13,8 mld anni" : "13.8 Ga";
+
   gfx->setTextColor(COL_TEXT);
   gfx->setCursor(CH_LEFT, y);
-  gfx->print(F("Universe Timeline"));
+  gfx->print(title);
 
   gfx->setTextColor(CH_SUBTLE);
-  gfx->setCursor(CH_RIGHT - txtW(7, TEXT_SCALE), y);
-  gfx->print(F("13.8 Ga"));
+  gfx->setCursor(CH_RIGHT - txtW(strlen(age), TEXT_SCALE), y);
+  gfx->print(age);
 
   const int16_t lineY = y + 30;
   gfx->fillRoundRect(CH_LEFT, lineY, CH_BAR_W, 8, 3, CH_BAR_BG);
@@ -196,17 +214,21 @@ static void drawUniverse() {
   const int16_t labelY = lineY + 18;
   gfx->setTextSize(1);
 
+  const char *bigBang = "Big Bang";
+  const char *solar = it ? "Sistema solare" : "Solar system";
+  const char *present = it ? "Oggi" : "Now";
+
   gfx->setTextColor(COL_ACCENT1);
   gfx->setCursor(mBigBang - 4, labelY);
-  gfx->print(F("Big Bang"));
+  gfx->print(bigBang);
 
   gfx->setTextColor(COL_ACCENT2);
-  gfx->setCursor(mSolar - 28, labelY);
-  gfx->print(F("Solar sys."));
+  gfx->setCursor(mSolar - (int16_t)(strlen(solar) * 3), labelY);
+  gfx->print(solar);
 
   gfx->setTextColor(COL_ACCENT1);
-  gfx->setCursor(mNow - 10, labelY);
-  gfx->print(F("Now"));
+  gfx->setCursor(mNow - (int16_t)(strlen(present) * 6), labelY);
+  gfx->print(present);
 }
 
 inline void pageChronos() {
@@ -214,11 +236,12 @@ inline void pageChronos() {
   drawHeader(F("CHRONOS"));
 
   gfx->setTextSize(TEXT_SCALE);
+  const bool it = (g_lang == "it");
 
   ChProg p;
   calcProgress(p);
 
-  drawHuman(p);
-  drawCosmic();
-  drawUniverse();
+  drawHuman(p, it);
+  drawCosmic(it);
+  drawUniverse(it);
 }

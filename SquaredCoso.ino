@@ -310,6 +310,14 @@ void pageCountdowns();
 
 void drawCurrentPage() {
   ensureCurrentPageEnabled();
+
+  // A full page draw already consumes any pending refresh for this page.
+  // Without clearing the flag here, data fetched before the first visit leaves
+  // the page marked dirty: it is drawn while the backlight is faded out, then
+  // immediately drawn a second time after fade-in, producing a one-shot flicker.
+  if (g_page >= 0 && g_page < PAGES)
+    g_pageDirty[g_page] = false;
+
   gfx->fillScreen(COL_BG);
 
   switch (g_page) {
@@ -343,11 +351,8 @@ void refreshAll() {
 }
 
 static void redrawDirtyCurrentPage() {
-  if (g_page >= 0 && g_page < PAGES && g_pageDirty[g_page]) {
-    g_pageDirty[g_page] = false;
-    gfx->fillScreen(COL_BG);
+  if (g_page >= 0 && g_page < PAGES && g_pageDirty[g_page])
     drawCurrentPage();
-  }
 }
 
 static CosinoRLE pickRandomCosino() {
@@ -453,7 +458,10 @@ void loop() {
         if (g_show[P_T24] && fetchTemp24()) g_pageDirty[P_T24] = true;
         refreshStep = R_SUN; break;
       case R_SUN:
-        if (g_show[P_SUN] && fetchSun()) g_pageDirty[P_SUN] = true;
+        if ((g_show[P_SUN] || g_show[P_STELLAR]) && fetchSun()) {
+          if (g_show[P_SUN]) g_pageDirty[P_SUN] = true;
+          if (g_show[P_STELLAR]) g_pageDirty[P_STELLAR] = true;
+        }
         refreshStep = R_NEWS; break;
       case R_NEWS:
         if (g_show[P_NEWS] && fetchNews()) g_pageDirty[P_NEWS] = true;
